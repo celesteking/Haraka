@@ -80,7 +80,7 @@ ResultStore.prototype.add = function (plugin, obj) {
     }
 
     // logging results
-    if (obj.emit) this.conn.loginfo(plugin, result.human);  // by request
+    if (obj.emit && result.human.trim().length > 0) this.conn.loginfo(plugin, result.human);  // by request
     if (obj.err)  this.conn.logerror(plugin, obj.err);      // by default
     if (!obj.emit && !obj.err) {                            // by config
         var pic = cfg[name];
