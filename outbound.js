@@ -982,11 +982,12 @@ HMailItem.prototype.try_deliver_host = function (mx) {
     
     var host = this.hostlist.shift();
     var port            = mx.port || 25;
-    var socket          = sock.connect({port: port, host: host, localAddress: mx.bind});
+    this.bind_ip        = mx.bind || (this.todo.notes && this.todo.notes.bind_ip);
+    var socket          = sock.connect({port: port, host: host, localAddress: this.bind_ip});
     var self            = this;
     var processing_mail = true;
 
-    this.loginfo("Attempting to deliver to: " + host + ":" + port + (mx.using_lmtp ? " using LMTP" : "") + " (" + delivery_queue.length() + ") (" + temp_fail_queue.length() + ")");
+    this.loginfo("Attempting to deliver" + (this.bind_ip ? ' {'+this.bind_ip+'} ': ' ') + "to: " + host + ":" + port + (mx.using_lmtp ? " using LMTP" : "") + " (" + delivery_queue.length() + ") (" + temp_fail_queue.length() + ")");
 
     socket.on('error', function (err) {
         if (processing_mail) {
@@ -1488,6 +1489,7 @@ HMailItem.prototype.delivered = function (ip, port, mode, host, response, ok_rec
                    ' host="' + host + '"' +
                    ' ip=' + ip +
                    ' port=' + port +
+                   ' bindip=' + (this.bind_ip || 'default') +
                    ' mode=' + mode + 
                    ' tls=' + ((secured) ? 'Y' : 'N') +
                    ' auth=' + ((authenticated) ? 'Y' : 'N') +
