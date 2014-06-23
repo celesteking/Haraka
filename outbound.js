@@ -1278,6 +1278,7 @@ HMailItem.prototype.try_deliver_host = function (mx) {
                     }
                     else {
                         reason = response.join(' ');
+                        self.lognotice('recipient domain <' + self.todo.domain + '> rejected: ' + reason);
                         send_command('QUIT');
                         processing_mail = false;
                         return self.bounce(reason, { mx: mx });
