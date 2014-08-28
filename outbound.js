@@ -741,17 +741,22 @@ HMailItem.prototype._send = function () {
     plugins.run_hooks('send_email', this);
 };
 
-HMailItem.prototype.send_email_respond = function (retval, delay_seconds) {
-    if (retval === constants.delay) {
-        // Try again in 'delay' seconds.
-        this.logdebug("Delivery of this email delayed for " + delay_seconds + " seconds");
-        var hmail = this;
-        hmail.next_cb();
-        temp_fail_queue.add(delay_seconds * 1000, function () { delivery_queue.push(hmail); });
-    }
-    else {
-        this.logdebug("Sending mail: " + this.filename);
-        this.get_mx();
+HMailItem.prototype.send_email_respond = function (retval, param) {
+    switch(retval) {
+        case constants.delay:
+            // Try again in 'delay' seconds.
+            this.logdebug("Delivery of this email delayed for " + param + " seconds");
+            var hmail = this;
+            hmail.next_cb();
+            temp_fail_queue.add(param * 1000, function () { delivery_queue.push(hmail) });
+            break;
+        case constants.deny:
+            this.logwarn("send_email plugin returned DENY: " + param);
+            this.bounce(param);
+            break;
+        default:
+            this.logdebug("Sending mail: " + this.filename);
+            this.get_mx();
     }
 };
 
