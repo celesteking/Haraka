@@ -424,7 +424,7 @@ exports.send_trans_email = function (transaction, next) {
         transaction.add_header('Date', date_to_str(new Date()));
     }
 
-    transaction.add_leading_header('Received', '(Haraka outbound); ' + date_to_str(new Date()));
+    transaction.add_leading_header('Received', '(Haraka outbound) with LOCAL id ' + transaction.uuid + '; ' + date_to_str(new Date()));
 
     var deliveries = [];
     var always_split = cfg.always_split;
@@ -446,7 +446,7 @@ exports.send_trans_email = function (transaction, next) {
             deliveries.push({'domain': domain, 'rcpts': recips[domain]});
         });
     }
-    
+
     var hmails = [];
     var ok_paths = [];
 
