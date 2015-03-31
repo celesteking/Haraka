@@ -1,6 +1,7 @@
 // access plugin
 var net_utils = require('./net_utils');
 var utils     = require('./utils');
+var Address   = require('Haraka/address').Address;
 
 exports.register = function() {
     var plugin = this;
@@ -391,8 +392,15 @@ exports.in_list = function (type, phase, address) {
         console.log("phase not defined: " + phase);
         return false;
     }
+
     if (plugin.list[type][phase][address]) { return true; }
-    return false;
+
+    try {
+        var addr = new Address(address);
+        return plugin.list[type][phase].indexOf(addr.host) !== -1;
+    } catch (err) {
+        return false;
+    }
 };
 
 exports.in_re_list = function (type, phase, address) {
