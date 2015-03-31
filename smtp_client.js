@@ -10,6 +10,7 @@ var line_socket = require('./line_socket');
 var logger = require('./logger');
 var uuid = require('./utils').uuid;
 var utils = require('./utils');
+var constants = require('./constants')
 
 var smtp_regexp = /^([0-9]{3})([ -])(.*)/;
 var STATE = {
@@ -17,12 +18,13 @@ var STATE = {
     ACTIVE: 2,
     RELEASED: 3,
     DESTROYED: 4,
+    SHUTDOWN: 5,
 };
 
 var tls_key;
 var tls_cert;
 
-function SMTPClient(port, host, connect_timeout, idle_timeout) {
+function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
     events.EventEmitter.call(this);
     this.uuid = uuid();
     this.connect_timeout = parseInt(connect_timeout) || 30;
@@ -35,6 +37,9 @@ function SMTPClient(port, host, connect_timeout, idle_timeout) {
     this.connected = false;
     this.authenticated = false;
     this.auth_capabilities = [];
+    this.mails_sent = 0;
+    this.max_sent_mails = max_mails || 0;
+
     var client = this;
 
     this.socket.on('line', function (line) {
@@ -183,8 +188,6 @@ SMTPClient.prototype.release = function () {
     this.removeAllListeners('dot');
     this.removeAllListeners('rset');
     this.removeAllListeners('auth');
-    this.removeAllListeners('client_protocol');
-    this.removeAllListeners('server_protocol');
     this.removeAllListeners('error');
     this.removeAllListeners('bad_code');
 
@@ -198,12 +201,60 @@ SMTPClient.prototype.release = function () {
             return;
         }
         this.state = STATE.IDLE;
+        this.removeAllListeners('client_protocol');
+        this.removeAllListeners('server_protocol');
         this.removeAllListeners('rset');
         this.removeAllListeners('bad_code');
         this.pool.release(this);
     });
 
     this.send_command('RSET');
+};
+
+SMTPClient.prototype.shutdown = function () {
+    if (!this.connected || this.command === 'data' || this.command === 'mailbody') {
+        // Destroy here, we can't reuse a connection that was mid-data.
+        this.destroy();
+        return;
+    }
+
+    logger.logdebug('[smtp_client_pool] ' + this.uuid + ' shutting down, state=' + this.state);
+    if (this.state === STATE.DESTROYED) {
+        return;
+    }
+
+    this.state = STATE.SHUTDOWN;
+    this.removeAllListeners('greeting');
+    this.removeAllListeners('capabilities');
+    this.removeAllListeners('xclient');
+    this.removeAllListeners('helo');
+    this.removeAllListeners('mail');
+    this.removeAllListeners('rcpt');
+    this.removeAllListeners('data');
+    this.removeAllListeners('dot');
+    this.removeAllListeners('rset');
+    this.removeAllListeners('auth');
+    this.removeAllListeners('error');
+    this.removeAllListeners('bad_code');
+    this.removeAllListeners('rset');
+
+    this.on('bad_code', function (code, msg) {
+        this.destroy();
+    });
+
+    this.on('quit', function () {
+        logger.logdebug('[smtp_client_pool] ' + this.uuid + ' shutting down (on quit), state=' + this.state);
+        if (this.state === STATE.DESTROYED) {
+            return;
+        }
+        this.removeAllListeners('quit');
+        this.removeAllListeners('client_protocol');
+        this.removeAllListeners('server_protocol');
+        this.removeAllListeners('bad_code');
+        this.destroy();
+    });
+
+    this.send_command('QUIT');
 };
 
 SMTPClient.prototype.destroy = function () {
@@ -218,15 +269,18 @@ SMTPClient.prototype.is_dead_sender = function (plugin, connection) {
     // This likely means the sender went away on us, cleanup.
     connection.logwarn(plugin, "transaction went away, releasing smtp_client");
     this.release();
+    this.call_next(constants['denysoft'], 'smtpclient said transaction went away');
     return true;
 };
 
 // Separate pools are kept for each set of server attributes.
-exports.get_pool = function (server, port, host, connect_timeout, pool_timeout, max) {
+exports.get_pool = function (server, port, host, connect_timeout, pool_timeout, max, max_mails) {
     port = port || 25;
     host = host || 'localhost';
     connect_timeout = (connect_timeout === undefined) ? 30 : connect_timeout;
     pool_timeout = (pool_timeout === undefined) ? 300 : pool_timeout;
+    max_mails = max_mails || 0;
+
     var name = port + ':' + host + ':' + pool_timeout;
     if (!server.notes.pool) {
         server.notes.pool = {};
@@ -235,12 +289,18 @@ exports.get_pool = function (server, port, host, connect_timeout, pool_timeout, 
         var pool = generic_pool.Pool({
             name: name,
             create: function (callback) {
-                var smtp_client = new SMTPClient(port, host, connect_timeout);
-                logger.logdebug('[smtp_client_pool] uuid=' + smtp_client.uuid + ' host=' +
-                    host + ' port=' + port + ' pool_timeout=' + pool_timeout + ' created');
+                var smtp_client = new SMTPClient(port, host, connect_timeout, null, max_mails);
+                logger.logdebug('[smtp_client_pool] uuid=' + smtp_client.uuid + ' host=' + host
+                    + ' port=' + port + ' pool_timeout=' + pool_timeout + ' max_mails=' + max_mails + ' created');
                 callback(null, smtp_client);
             },
             destroy: function(smtp_client) {
+                if (smtp_client.state === STATE.IDLE && !smtp_client.want_to_die) { // destroy had fallen upon us probably because of timeout
+                    smtp_client.want_to_die = true; // better safe than sorry
+                    logger.logdebug('[smtp_client_pool] ' + smtp_client.uuid + ' is asked to be shutdown, state=' + smtp_client.state);
+                    smtp_client.shutdown();
+                }
+
                 logger.logdebug('[smtp_client_pool] ' + smtp_client.uuid + ' destroyed, state=' + smtp_client.state);
                 smtp_client.state = STATE.DESTROYED;
                 smtp_client.socket.destroy();
@@ -252,9 +312,10 @@ exports.get_pool = function (server, port, host, connect_timeout, pool_timeout, 
             },
             max: max || 1000,
             idleTimeoutMillis: pool_timeout * 1000,
+            reapIntervalMillis: 1000,
             log: function (str, level) {
                 level = (level === 'verbose') ? 'debug' : level;
-                logger['log' + level]('[smtp_client_pool] [' + name + '] ' + str);
+                logger['log' + level]('[smtp_client_pool] [' + name + '] ## ' + str);
             }
         });
 
@@ -292,27 +353,32 @@ exports.get_client_plugin = function (plugin, connection, config, callback) {
             pass: c.auth_pass
         }
     }
+
+    var cfg_error_action = c.error_action && constants[config.error_action.toLowerCase()];
+
     var pool = exports.get_pool(connection.server, c.port, c.host,
-                                c.connect_timeout, c.timeout, c.max_connections);
+                                c.connect_timeout, c.timeout, c.max_connections, c.max_mails);
     pool.acquire(function (err, smtp_client) {
         connection.logdebug(plugin, 'Got smtp_client: ' + smtp_client.uuid);
+        connection.logdebug(plugin, 'Got smtp_client [sent: ' + smtp_client.mails_sent + '/' + smtp_client.max_sent_mails + '] uuid: ' + smtp_client.uuid);
 
         var secured = false;
 
         smtp_client.call_next = function (retval, msg) {
-            if (this.next) {
+            if (this.next && !smtp_client.next_called) {
                 var next = this.next;
                 delete this.next;
+                smtp_client.next_called = true;
                 next(retval, msg);
             }
         };
 
         smtp_client.on('client_protocol', function (line) {
-            connection.logprotocol(plugin, 'C: ' + line);
+            plugin.logprotocol('SC ['+ smtp_client.uuid +'] C: ' + line);
         });
 
         smtp_client.on('server_protocol', function (line) {
-            connection.logprotocol(plugin, 'S: ' + line);
+            plugin.logprotocol('SC ['+ smtp_client.uuid +'] S: ' + line);
         });
 
         var helo = function (command) {
@@ -401,8 +467,8 @@ exports.get_client_plugin = function (plugin, connection, config, callback) {
         });
 
         smtp_client.on('error', function (msg) {
-            connection.logwarn(plugin, msg);
-            smtp_client.call_next();
+            plugin.logwarn(msg, connection);
+            smtp_client.call_next(cfg_error_action, 'backend: ' + msg);
         });
 
         if (smtp_client.connected) {
