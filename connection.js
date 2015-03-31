@@ -1063,6 +1063,12 @@ Connection.prototype.cmd_proxy = function (line) {
     this.loginfo('HAProxy: proto=' + proto +
         ' src_ip=' + src_ip + ':' + src_port +
         ' dst_ip=' + dst_ip + ':' + dst_port);
+
+    this.notes.proxy = {
+        type: 'haproxy', proto: proto,
+        src_ip: src_ip, src_port: src_port, dst_ip: dst_ip, dst_port: dst_port, proxy_ip: this.remote_ip
+    };
+
     this.reset_transaction(function () {
         self.relaying = false;
         self.remote_ip = src_ip;
@@ -1147,8 +1153,8 @@ Connection.prototype.cmd_mail = function(line) {
     if (!this.hello_host) {
         return this.respond(503, 'Use EHLO/HELO before MAIL');
     }
-    // Require authentication on connections to port 587 & 465
-    if (!this.relaying && [587,465].indexOf(this.local_port) !== -1) {
+    // Require authentication on connections to port 587 & 465 and 2587
+    if (!this.relaying && [587,465,2587].indexOf(this.local_port) !== -1) {
         return this.respond(550, 'Authentication required');
     }
     var results;
