@@ -38,7 +38,8 @@ exports.hook_data_post = function (next, connection) {
     var plugin = this;
     if (plugin.msg_too_big(connection)) return next();
 
-    connection.transaction.remove_header('X-Haraka-Auth'); // just to be safe
+    var header_name = plugin.cfg.main['spamc_auth_header'] || 'X-Haraka-Relay';
+    connection.transaction.remove_header(header_name); // just to be safe
 
     var username        = plugin.get_spamd_username(connection);
     var headers         = plugin.get_spamd_headers(connection, username);
@@ -242,7 +243,8 @@ exports.get_spamd_headers = function(connection, username) {
         'X-Haraka-UUID: ' + connection.transaction.uuid,
     ];
     if (connection.notes.auth_user) {
-        headers.push('X-Haraka-Auth: true');
+        var header_name = plugin.cfg.main['spamc_auth_header'] || 'X-Haraka-Relay';
+        headers.push(header_name + ': true');
     }
 
     return headers;
