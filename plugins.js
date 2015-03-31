@@ -72,7 +72,7 @@ Plugin.prototype._get_plugin_paths = function () {
 
 function get_timeout (name) {
 
-    var timeout = parseFloat((config.get(name + '.timeout')));
+    var timeout = parseFloat((config.get(name.replace(/\//, ':') + '.timeout')));
     if (isNaN(timeout)) {
         logger.logdebug('no timeout in ' + name + '.timeout');
         timeout = parseFloat(config.get('plugin_timeout'));
