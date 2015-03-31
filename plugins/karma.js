@@ -342,6 +342,8 @@ exports.karma_penalty = function (next, connection) {
     if (r.fail.indexOf('penalty') === -1) { return next(); }
 
     var taunt = plugin.cfg.penalty.taunt || "karma penalty";
+    taunt = taunt.replace(/{ip}/, connection.remote_ip);
+    
     var delay = 10;
     if (plugin.cfg.penalty && plugin.cfg.penalty.disconnect_delay) {
         delay = parseFloat(plugin.cfg.penalty.disconnect_delay);
