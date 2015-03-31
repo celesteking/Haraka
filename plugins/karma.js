@@ -131,9 +131,9 @@ exports.apply_tarpit = function (connection, hook, score, next) {
         connection.logdebug(plugin, "tarpit reduced to max: " + delay);
     }
 
-    connection.loginfo(plugin, 'tarpitting '+hook+' for ' + delay + 's');
+    connection.logdebug(plugin, 'tarpitting '+hook+' for ' + delay + 's');
     setTimeout(function () {
-        connection.loginfo(plugin, 'tarpit '+hook+' end');
+        connection.logdebug(plugin, 'tarpit '+hook+' end');
         next();
     }, delay * 1000);
 };
@@ -343,7 +343,7 @@ exports.karma_penalty = function (next, connection) {
 
     var taunt = plugin.cfg.penalty.taunt || "karma penalty";
     taunt = taunt.replace(/{ip}/, connection.remote_ip);
-    
+
     var delay = 10;
     if (plugin.cfg.penalty && plugin.cfg.penalty.disconnect_delay) {
         delay = parseFloat(plugin.cfg.penalty.disconnect_delay);
@@ -554,7 +554,7 @@ exports.get_award_location = function (connection, award_key) {
         return obj;
     }
 
-    connection.logdebug(plugin, "unknown location for " + award_key);
+    connection.loginfo(plugin, "unknown location for " + award_key);
 };
 
 exports.get_award_condition = function (note_key, note_val) {
