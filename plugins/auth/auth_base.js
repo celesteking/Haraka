@@ -83,10 +83,19 @@ exports.check_user = function (next, connection, credentials, method) {
     }
 
     var passwd_ok = function (valid) {
+        var auth_status_text = valid ? 'Authentication successful' : 'Authentication failed';
+
+        if (connection.notes.auth_extra_info) {
+            if (connection.notes.auth_extra_info.override_text)
+                auth_status_text = connection.notes.auth_extra_info.override_text;
+            else
+                auth_status_text += ' : ' + connection.notes.auth_extra_info.add_text;
+        }
+
         if (valid) {
             connection.relaying = true;
             connection.results.add({name:'relay'}, {pass: 'auth'});
-            connection.respond(235, "Authentication successful", function () {
+            connection.respond(235, auth_status_text, function () {
                 connection.authheader = "(authenticated bits=0)\n";
                 connection.auth_results('auth=pass ('+method.toLowerCase()+')' );
                 connection.notes.auth_user = credentials[0];
@@ -110,7 +119,7 @@ exports.check_user = function (next, connection, credentials, method) {
         // here we include the username, as shown in RFC 5451 example
         connection.auth_results('auth=fail ('+method.toLowerCase()+') smtp.auth='+ credentials[0]);
         setTimeout(function () {
-            connection.respond(535, "Authentication failed", function () {
+            connection.respond(535, auth_status_text, function () {
                 connection.reset_transaction(function () {
                     return next(OK);
                 });
