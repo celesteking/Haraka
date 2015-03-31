@@ -197,11 +197,11 @@ exports.hook_deny = function (next, connection, params) {
     // exceptions, whose 'DENY' should not be captured
     if (pi_name) {
         if (pi_name === 'karma' || plugin.deny_exclude_plugins[pi_name] ) {
-            return next();
+            return next(CONT, 'skipping hook present in deny_excludes.plugins');
         }
     }
     if (pi_hook && plugin.deny_exclude_hooks[pi_hook]) {
-        return next();
+        return next(CONT, 'skipping hook present in deny_excludes.hooks');
     }
 
     // let temporary errors pass through
