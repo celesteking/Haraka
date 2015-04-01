@@ -11,6 +11,7 @@ var logger = require('./logger');
 var uuid = require('./utils').uuid;
 var utils = require('./utils');
 var constants = require('./constants')
+var DSN = require('./dsn');
 
 var smtp_regexp = /^([0-9]{3})([ -])(.*)/;
 var STATE = {
@@ -127,7 +128,10 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
             if (!error) {
                 error = '';
             }
-            var errMsg = client.uuid + ': SMTP connection ' + msg + ' ' + error;
+
+            var errMsg = '['+ client.uuid + '] SMTP connection ' + msg + ' ' + error;
+            var saved_state = client.state;
+
             switch (client.state) {
                 case STATE.ACTIVE:
                 case STATE.IDLE:
@@ -136,10 +140,12 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
                     break;
                 default:
             }
-            if (client.state === STATE.ACTIVE) {
+
+            if (([STATE.ACTIVE, STATE.IDLE].indexOf(saved_state) > -1) && (error instanceof Error)) {
                 client.emit('error', errMsg);
                 return;
             }
+
             logger.logdebug('[smtp_client_pool] ' + errMsg + ' (state=' + client.state + ')');
         };
     };
@@ -354,7 +360,7 @@ exports.get_client_plugin = function (plugin, connection, config, callback) {
         }
     }
 
-    var cfg_error_action = c.error_action && constants[config.error_action.toLowerCase()];
+    var cfg_error_action = c.error_action && constants[c.error_action.toLowerCase()];
 
     var pool = exports.get_pool(connection.server, c.port, c.host,
                                 c.connect_timeout, c.timeout, c.max_connections, c.max_mails);
@@ -468,7 +474,7 @@ exports.get_client_plugin = function (plugin, connection, config, callback) {
 
         smtp_client.on('error', function (msg) {
             plugin.logwarn(msg, connection);
-            smtp_client.call_next(cfg_error_action, 'backend: ' + msg);
+            smtp_client.call_next(cfg_error_action, DSN.sys_not_accepting_mail('backend said: ' + msg));
         });
 
         if (smtp_client.connected) {
