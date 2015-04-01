@@ -234,6 +234,8 @@ exports.get_spamd_username = function(connection) {
 };
 
 exports.get_spamd_headers = function(connection, username) {
+    var plugin = this;
+
     // http://svn.apache.org/repos/asf/spamassassin/trunk/spamd/PROTOCOL
     var headers = [
         'HEADERS SPAMC/1.4',
