@@ -39,6 +39,9 @@ exports.load_config = function () {
                 '-deny_relay.mfrom_softfail',
                 '-deny_relay.mfrom_fail',
                 '-deny_relay.mfrom_permerror',
+
+                '-bypass.relaying',
+                '-bypass.auth',
             ]
         },
         function () { plugin.load_config(); }
@@ -70,6 +73,9 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
 
     // Bypass private IPs
     if (net_utils.is_private_ip(connection.remote_ip)) { return next(); }
+
+    // bypass auth'ed or relay'ing hosts if told to
+    if (exports.bypass_hosts(connection)) { return next(); }
 
     // RFC 4408, 2.1: "SPF clients must be prepared for the "HELO"
     //           identity to be malformed or an IP address literal.
@@ -109,6 +115,9 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
 
 exports.hook_mail = function (next, connection, params) {
     var plugin = this;
+
+    // bypass auth'ed or relay'ing hosts if told to
+    if (exports.bypass_hosts(connection)) { return next(); }
 
     // For inbound message from a private IP, skip MAIL FROM check
     if (!connection.relaying && net_utils.is_private_ip(connection.remote_ip)) return next();
@@ -258,4 +267,18 @@ exports.save_to_header = function (connection, spf, result, mfrom, host, id) {
             'envelope-from=<' + mfrom + '>'
         ].join('; ')
     );
+};
+
+if (net_utils.is_private_ip(connection.remote_ip)) { return next(); }
+
+exports.bypass_hosts = function(connection) {
+    var plugin = this;
+
+    var cbypass = plugin.cfg.bypass;
+
+    return cbypass && (
+            (cbypass.relaying && connection.relaying)
+                ||
+            (cbypass.auth && connection.notes.auth_user));
+
 };
