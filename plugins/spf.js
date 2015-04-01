@@ -269,8 +269,6 @@ exports.save_to_header = function (connection, spf, result, mfrom, host, id) {
     );
 };
 
-if (net_utils.is_private_ip(connection.remote_ip)) { return next(); }
-
 exports.bypass_hosts = function(connection) {
     var plugin = this;
 
