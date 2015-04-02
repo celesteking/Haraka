@@ -454,7 +454,7 @@ exports.send_trans_email = function (transaction, next) {
 
     async.forEachSeries(deliveries, function (deliv, cb) {
         var todo = new TODOItem(deliv.domain, deliv.rcpts, transaction);
-        todo.uuid = todo.uuid + '.' + todo_index;
+        todo.uuid = build_transaction_uuid(todo.uuid, todo_index);
         todo_index++;
         self.process_delivery(ok_paths, todo, hmails, cb);
     }, 
@@ -607,6 +607,11 @@ function TODOItem (domain, recipients, transaction) {
     this.notes = transaction.notes;
     this.uuid = transaction.uuid;
     return this;
+}
+
+// Append index to UUID unless UUID doesn't already contain it
+function build_transaction_uuid(uuid, index) {
+    return uuid.match(/\d+\.\d+$/) ? uuid : uuid + '.' + index;
 }
 
 /////////////////////////////////////////////////////////////////////////////
