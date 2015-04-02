@@ -130,7 +130,9 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
             }
 
             var errMsg = '['+ client.uuid + '] SMTP connection ' + msg + ' ' + error;
-            var saved_state = client.state;
+
+            if ([STATE.ACTIVE].indexOf(client.state) > -1)
+                client.closed_while_active = true;
 
             switch (client.state) {
                 case STATE.ACTIVE:
@@ -141,12 +143,16 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
                 default:
             }
 
-            if (([STATE.ACTIVE, STATE.IDLE].indexOf(saved_state) > -1) && (error instanceof Error)) {
-                client.emit('error', errMsg);
-                return;
-            }
-
             logger.logdebug('[smtp_client_pool] ' + errMsg + ' (state=' + client.state + ')');
+
+            if (client.closed_while_active) {
+                if (error instanceof Error)
+                    client.emit('error', errMsg);
+                else if (!error && msg == 'closed') { // we skip when error == true because we already handled that case above
+                    errMsg = '['+ client.uuid + '] Remote party abruptly terminated the connection';
+                    client.emit('error', errMsg);
+                }
+            }
         };
     };
 
