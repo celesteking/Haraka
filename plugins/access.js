@@ -413,12 +413,7 @@ exports.in_list = function (type, phase, address) {
 exports.in_re_list = function (type, phase, address) {
     var plugin = this;
     if (!plugin.list_re[type][phase]) { return false; }
-    if (!plugin.cfg.re[type][phase].source) {
-        plugin.logdebug(plugin, 'empty file: ' + plugin.cfg.re[type][phase]);
-        return false;  // empty config file
-    }
-    plugin.logdebug(plugin, 'checking ' + address + ' against ' +
-            plugin.cfg.re[type][phase].source);
+    plugin.logdebug(plugin, 'checking ' + address + ' against ' + plugin.cfg.re[type][phase].source);
     return plugin.list_re[type][phase].test(address);
 };
 
