@@ -218,7 +218,7 @@ exports.rdns_match = function (next, connection, helo) {
     }
 
     if (net_utils.is_ipv4_literal(helo)) {
-        connection.results.add(plugin, {fail: 'rdns_match(literal)'});
+        connection.results.add(plugin, {skip: 'rdns_match(literal)'});
         return next();
     }
 
@@ -304,7 +304,7 @@ exports.big_company = function (next, connection, helo) {
     }
 
     if (!plugin.cfg.bigco[helo]) {
-        connection.results.add(plugin, {pass: 'big_co(not)'});
+        connection.results.add(plugin, {skip: 'big_co(not)'});
         return next();
     }
 
@@ -385,16 +385,16 @@ exports.forward_dns = function (next, connection, helo) {
         return next();
     }
 
+    if (net_utils.is_ipv4_literal(helo)) {
+        connection.results.add(plugin, {skip: 'forward_dns(literal)'});
+        return next();
+    }
+
     if (!connection.results.has('helo.checks', 'pass', /^valid_hostname/)) {
         connection.results.add(plugin, {fail: 'forward_dns(invalid_hostname)'});
         if (plugin.cfg.reject.forward_dns) {
             return next(DENY, "Invalid HELO host cannot achieve forward DNS match");
         }
-        return next();
-    }
-
-    if (net_utils.is_ipv4_literal(helo)) {
-        connection.results.add(plugin, {skip: 'forward_dns(literal)'});
         return next();
     }
 
