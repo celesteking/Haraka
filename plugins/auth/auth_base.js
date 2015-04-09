@@ -102,7 +102,6 @@ exports.check_user = function (next, connection, credentials, method) {
                 connection.auth_results('auth=pass (' +
                             method.toLowerCase() + ')' );
                 connection.notes.auth_user = credentials[0];
-                connection.notes.auth_passwd = credentials[1];
                 return next(OK);
             });
             return;
