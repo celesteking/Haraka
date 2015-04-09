@@ -121,7 +121,7 @@ exports.check_user = function (next, connection, credentials, method) {
         if (plugin.timeout && delay >= plugin.timeout) {
             delay = plugin.timeout - 1;
         }
-        connection.lognotice(plugin, 'delaying for ' + delay + ' seconds');
+        connection.logdebug(plugin, 'delaying for ' + delay + ' seconds');
         // here we include the username, as shown in RFC 5451 example
         connection.auth_results('auth=fail (' + method.toLowerCase() +
                     ') smtp.auth='+ credentials[0]);
