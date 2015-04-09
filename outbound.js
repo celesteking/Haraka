@@ -611,7 +611,7 @@ function TODOItem (domain, recipients, transaction) {
 
 // Append index to UUID unless UUID doesn't already contain it
 function build_transaction_uuid(uuid, index) {
-    return uuid.match(/\d+\.\d+$/) ? uuid : uuid + '.' + index;
+    return uuid.match(/\w+\.\d+$/) ? uuid : uuid + '.' + index;
 }
 
 /////////////////////////////////////////////////////////////////////////////
