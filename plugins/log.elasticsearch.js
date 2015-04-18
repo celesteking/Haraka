@@ -4,23 +4,15 @@
 exports.register = function() {
     var plugin = this;
 
-    var elasticsearch;
     try {
-        elasticsearch = require('elasticsearch');
+        var elasticsearch = require('elasticsearch');
     }
     catch (err) {
         plugin.logerror(err);
         return;
     }
 
-    plugin.cfg = plugin.config.get('log.elasticsearch.ini');
-
-    if (!plugin.cfg.main.host) {
-        plugin.cfg.main.host = 'localhost';
-    }
-    if (!plugin.cfg.main.port) {
-        plugin.cfg.main.port = '9200';
-    }
+    plugin.load_es_ini();
 
     plugin.es = new elasticsearch.Client({
         host: plugin.cfg.main.host + ':' + plugin.cfg.main.port,
@@ -28,20 +20,35 @@ exports.register = function() {
     });
 
     plugin.es.ping({
-        // ping usually has a 100ms timeout 
+        // ping usually has a 100ms timeout
         requestTimeout: 1000,
-        
-        // undocumented params are appended to the query string 
+
+        // undocumented params are appended to the query string
         hello: "elasticsearch!"
         }, function (error) {
-        if (error) {
+        if (!error) {
             plugin.logerror('Elasticsearch cluster is down!');
-        } else {
+        }
+        else {
             plugin.lognotice('Elasticsearch is connected');
         }
     });
 
     plugin.register_hook('disconnect', 'elasticsearch');
+};
+
+exports.load_es_ini = function () {
+    var plugin = this;
+    plugin.cfg = plugin.config.get('log.elasticsearch.ini', function () {
+        plugin.load_es_ini();
+    });
+
+    if (!plugin.cfg.main.host) {
+        plugin.cfg.main.host = 'localhost';
+    }
+    if (!plugin.cfg.main.port) {
+        plugin.cfg.main.port = '9200';
+    }
 };
 
 exports.hook_reset_transaction = function (next, connection) {
@@ -52,7 +59,8 @@ exports.hook_reset_transaction = function (next, connection) {
         rcpts.push(r.original);
     });
 
-    connection.results.push(plugin, { txn: {
+    connection.results.push(plugin, {
+        txn: {
             mail_from: connection.transaction.mail_from.original,
             rcpt_to: rcpts,
         }
@@ -142,7 +150,7 @@ exports.trimPluginName = function (name) {
     var parts = name.split('.');
 
     switch (parts[0]) {
-        case 'helo':  
+        case 'helo':
             return 'helo';
         case 'connect':
         case 'mail_from':
@@ -165,11 +173,10 @@ exports.save_to_elasticsearch = function (conn, res) {
             body: JSON.stringify(res),
         }, function (error, response) {
             if (error) {
-                conn.logerror(plugin, error);
+                conn.logerror(plugin, error.message);
                 return;
             }
-            // c.lognotice(plugin, response);
-            // ...
+            // conn.loginfo(plugin, response);
         });
     }
     catch (e) {
@@ -235,45 +242,5 @@ exports.prune_empty = function (pi) {
             }
         }
     }
-};
-
-exports.get_results = function (connection, pi_name) {
-    var plugin = this;
-
-    /*
-    // calling code for this no-longer-used function
-    plugin.plugins = plugin.config.get('plugins', 'list');
-    plugin.plugins.forEach(function (p) {
-        var r = plugin.get_results(connection, p);
-        if (r === undefined) { return; }
-        if (Object.keys(r).length === 0) { return; }
-    });
-    /*/
-
-    var raw = {
-        cxn: connection.results.get(pi_name),
-    };
-    if (connection.transaction) {
-        raw.txn = connection.transaction.results.get(pi_name);
-    }
-    if (!raw.cxn && !raw.txn) return;
-
-    var merged = {};
-
-    // merge results
-    Object.keys(raw).forEach(function (loc) {
-        // connection.logerror(plugin, "loc " + loc);
-        if (!raw[loc]) { return; }
-        for (var key in raw[loc]) {
-            if (/human/.test(key)) { continue; }
-            if (key === 'todo' && pi_name === 'karma') { continue; }
-            // connection.logerror(plugin, "key " + key);
-            var val = raw[loc][key];
-            // connection.logerror(plugin, "key " + key);
-            
-        }
-    });
-
-    return merged;
 };
 
