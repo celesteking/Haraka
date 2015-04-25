@@ -359,7 +359,7 @@ exports.mailing_list = function (next, connection) {
                     found_mlm++;
                     continue;
                 }
-                connection.logerror(plugin, "mlm start miss: " + name + ': ' + header);
+                connection.loginfo(plugin, "mlm start miss: " + name + ': ' + header);
             }
             if (j.match) {
                 if (header.match(new RegExp(j.match,'i'))) {
@@ -367,7 +367,7 @@ exports.mailing_list = function (next, connection) {
                     found_mlm++;
                     continue;
                 }
-                connection.logerror(plugin, "mlm match miss: " + name + ': ' + header);
+                connection.loginfo(plugin, "mlm match miss: " + name + ': ' + header);
             }
             if (name === 'X-Mailman-Version') {
                 connection.transaction.results.add(plugin, {pass: 'MLM('+j.mlm+')'});
