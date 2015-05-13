@@ -92,16 +92,19 @@ exports.log_transaction = function (next, connection) {
     }, function (error, response) {
         if (error) {
             connection.logerror(plugin, error.message);
-            return next();
         }
         // connection.loginfo(plugin, response);
         connection.notes.elasticsearch=connection.tran_count;
-        next();
     });
+    next();
 };
 
 exports.log_connection = function (next, connection) {
     var plugin = this;
+
+    if (plugin.cfg.ignore_hosts) {
+        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
+    }
 
     if (connection.notes.elasticsearch &&
         connection.notes.elasticsearch === connection.tran_count) {
@@ -123,11 +126,9 @@ exports.log_connection = function (next, connection) {
     }, function (error, response) {
         if (error) {
             connection.logerror(plugin, error.message);
-            return;
         }
         // connection.loginfo(plugin, response);
     });
-
     next();
 };
 
@@ -187,8 +188,14 @@ exports.get_plugin_results = function (connection) {
     }
 
     if (connection.transaction) {
-        var txr = JSON.parse(JSON.stringify(
-                    connection.transaction.results.get_all()));
+        try {
+            var txr = JSON.parse(JSON.stringify(
+                        connection.transaction.results.get_all()));
+        }
+        catch (e) {
+            connection.transaction.results.add(plugin, {err: e.message });
+            return pir;
+        }
 
         for (name in txr) {
             plugin.trim_plugin_names(txr, name);
