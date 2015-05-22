@@ -161,7 +161,8 @@ exports.populate_conn_properties = function (conn, res) {
      'remote_ip', 'remote_host', 'remote_port',
      'greeting', 'hello_host',
      'relaying', 'esmtp', 'using_tls', 'errors',
-     'rcpt_count', 'msg_count', 'total_bytes'
+     'rcpt_count', 'msg_count', 'total_bytes',
+     'notes.tls'
     ].forEach(function (f) {
         if (conn[f] === undefined) { return; }
         if (conn[f] === 0) { return; }
@@ -185,6 +186,7 @@ exports.get_plugin_results = function (connection) {
         plugin.prune_noisy(pir, name);
         plugin.prune_empty(pir[name]);
         plugin.prune_zero(pir, name);
+        plugin.prune_redundant_cxn(pir, name);
     }
 
     if (connection.transaction) {
@@ -204,6 +206,7 @@ exports.get_plugin_results = function (connection) {
             plugin.prune_noisy(txr, name);
             plugin.prune_empty(txr[name]);
             plugin.prune_zero(txr, name);
+            plugin.prune_redundant_txn(txr, name);
         }
 
         // merge transaction results into connection results
@@ -312,11 +315,10 @@ exports.prune_noisy = function (res, pi) {
             delete res.max_unrecognized_commands;
             break;
         case 'spamassassin':
-            delete res.line0;
-            delete res.hits;
-            if (res.headers) {
-                delete res.headers.Tests;
-                delete res.headers.Level;
+            delete res.spamassassin.line0;
+            if (res.spamassassin.headers) {
+                delete res.spamassassin.headers.Tests;
+                delete res.spamassassin.headers.Level;
             }
     }
 };
@@ -325,5 +327,34 @@ exports.prune_zero = function (res, name) {
     for (var e in res[name]) {
         if (res[name][e] !== 0) continue;
         delete res[name][e];
+    }
+};
+
+exports.prune_redundant_cxn = function (res, name) {
+    switch (name) {
+        case 'helo':
+            if (res.helo && res.helo.helo_host) {
+                delete res.helo.helo_host;
+            }
+            break;
+        case 'p0f':
+            if (res.p0f && res.p0f.query) {
+                delete res.p0f.query;
+            }
+            break;
+    }
+};
+
+exports.prune_redundant_txn = function (res, name) {
+    switch (name) {
+        case 'spamassassin':
+            if (!res.spamassassin) break;
+            delete res.spamassassin.hits;
+            if (res.spamassassin.headers) {
+                if (res.spamassassin.headers.Flag) {
+                    delete res.spamassassin.headers.Flag;
+                }
+            }
+            break;
     }
 };
