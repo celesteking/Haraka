@@ -172,7 +172,10 @@ exports.should_we_deny = function (next, connection, hook) {
     }
 
     return plugin.apply_tarpit(connection, hook, score, function () {
-        next(DENY, "very bad karma score: " + score);
+        var taunt = plugin.cfg.penalty.karma_taunt || "very bad karma score: {score}";
+        taunt = taunt.replace(/{ip}/, connection.remote_ip);
+        taunt = taunt.replace(/{score}/, String(score));
+        next(DENY, taunt);
     });
 };
 
