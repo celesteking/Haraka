@@ -94,8 +94,13 @@ exports.log_transaction = function (next, connection) {
             connection.logerror(plugin, error.message);
         }
         // connection.loginfo(plugin, response);
-        connection.notes.elasticsearch=connection.tran_count;
     });
+
+    // hook reset_transaction doesn't seem to wait for next(). If I
+    // wait until after I get a response back from ES, Haraka throws
+    // "Error: We are already running hooks!". So we record that we've sent
+    // to ES (so connection isn't saved too) and hope for the best.
+    connection.notes.elasticsearch=connection.tran_count;
     next();
 };
 
