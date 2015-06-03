@@ -324,10 +324,17 @@ exports.msg_too_big = function(connection) {
 exports.log_results = function(connection, spamd_response) {
     var plugin = this;
     var cfg = plugin.cfg.main;
-    connection.loginfo(plugin, "status=" + spamd_response.flag +
-          ', score=' + spamd_response.score +
-          ', required=' + spamd_response.reqd +
-          ', reject=' + ((connection.relaying) ?
-             (cfg.relay_reject_threshold || cfg.reject_threshold) : cfg.reject_threshold) +
-          ', tests="' + spamd_response.tests + '"');
+    var reject_threshold = (connection.relaying) ? (cfg.relay_reject_threshold || cfg.reject_threshold) : cfg.reject_threshold;
+
+    var human_text = "status=" + spamd_response.flag +
+              ', score=' + spamd_response.score +
+              ', required=' + spamd_response.reqd +
+              ', reject=' + reject_threshold +
+              ', tests="' + spamd_response.tests + '"';
+
+    connection.transaction.results.add(plugin, {
+        human: human_text,
+        status: spamd_response.flag, score: parseFloat(spamd_response.score),
+        required: parseFloat(spamd_response.reqd), reject: reject_threshold, tests: spamd_response.tests,
+        emit: true});
 };
