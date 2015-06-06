@@ -77,7 +77,7 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
     // RFC 4408, 2.1: "SPF clients must be prepared for the "HELO"
     //           identity to be malformed or an IP address literal.
     if (net_utils.is_ipv4_literal(helo)) {
-        connection.results.add(plugin, {skip: 'ipv4_literal'});
+        connection.results.add(plugin, {skip: 'helo_ipv4_literal'});
         return next();
     }
 
@@ -115,11 +115,15 @@ exports.hook_mail = function (next, connection, params) {
     var plugin = this;
 
     // bypass auth'ed or relay'ing hosts if told to
-    if (exports.bypass_hosts(connection)) { return next(CONT, 'host bypass requested'); }
+    if (exports.bypass_hosts(connection)) {
+        connection.results.add(plugin, {skip: 'envelope_host_bypass'});
+        return next(CONT, 'host bypass requested');
+    }
 
     // For inbound message from a private IP, skip MAIL FROM check
     if (!connection.relaying &&
          net_utils.is_private_ip(connection.remote_ip)) {
+        connection.results.add(plugin, {skip: 'envelope_private_ip'});
         return next();
     }
 
