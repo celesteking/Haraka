@@ -637,7 +637,7 @@ Connection.prototype.resume = function () {
 
 Connection.prototype.lookup_rdns_respond = function (retval, msg) {
     var self = this;
-    switch(retval) {
+    switch (retval) {
         case constants.ok:
             this.remote_host = msg || 'Unknown';
             this.remote_info = this.remote_info || this.remote_host;
@@ -683,7 +683,7 @@ Connection.prototype.rdns_response = function (err, domains) {
 
 Connection.prototype.unrecognized_command_respond = function(retval, msg) {
     var self = this;
-    switch(retval) {
+    switch (retval) {
         case constants.ok:
             // response already sent, cool...
             break;
@@ -1562,49 +1562,91 @@ Connection.prototype.max_data_exceeded_respond = function (retval, msg) {
     });
 };
 
-Connection.prototype.queue_outbound_respond = function(retval, msg) {
-    var self = this;
-    if (retval !== constants.ok) {
-        this.lognotice('queue code=' + constants.translate(retval) + ' msg="' + (msg || '') + '"');
-    }
-    switch(retval) {
+Connection.prototype.queue_msg = function (retval, msg) {
+    if (msg) return msg;
+
+    switch (retval) {
         case constants.ok:
-            plugins.run_hooks("queue_ok", this, msg || 'Message Queued (' + self.transaction.uuid + ')');
+            return 'Message Queued (' + this.transaction.uuid + ')';
+        case constants.deny:
+        case constants.denydisconnect:
+            return 'Message denied';
+        case constants.denysoft:
+        case constants.denysoftdisconnect:
+            return 'Message denied temporarily';
+        default:
+            return '';
+    }
+};
+
+Connection.prototype.store_queue_result = function (retval, msg) {
+    var plugin = {name: 'queue'};
+    switch (retval) {
+        case constants.ok:
+            this.transaction.results.add(plugin, { pass: msg });
             break;
         case constants.deny:
-            this.respond(550, msg || "Message denied", function() {
+        case constants.denydisconnect:
+        case constants.denysoft:
+        case constants.denysoftdisconnect:
+            this.transaction.results.add(plugin, { fail: msg });
+            break;
+        default:
+            this.transaction.results.add(plugin, { msg: msg });
+            break;
+    }
+};
+
+Connection.prototype.queue_outbound_respond = function(retval, msg) {
+    var self = this;
+    if (!msg) msg = this.queue_msg(retval, msg);
+    this.store_queue_result(retval, msg);
+    if (retval !== constants.ok) {
+        this.lognotice('queue code=' + constants.translate(retval) + ' msg="' + msg + '"');
+    }
+    switch (retval) {
+        case constants.ok:
+            plugins.run_hooks('queue_ok', this, msg);
+            break;
+        case constants.deny:
+            this.respond(550, msg, function() {
                 self.msg_count.reject++;
                 self.reset_transaction(function () { self.resume();});
             });
             break;
         case constants.denydisconnect:
-            this.respond(550, msg || "Message denied", function() {
+            this.respond(550, msg, function() {
                 self.msg_count.reject++;
                 self.disconnect();
             });
             break;
         case constants.denysoft:
-            this.respond(450, msg || "Message denied temporarily", function() {
+            this.respond(450, msg, function() {
                 self.msg_count.tempfail++;
                 self.reset_transaction(function () { self.resume();});
             });
             break;
         case constants.denysoftdisconnect:
-            this.respond(450, msg || "Message denied temporarily", function() {
+            this.respond(450, msg, function() {
                 self.msg_count.tempfail++;
                 self.disconnect();
             });
             break;
         default:
             outbound.send_email(this.transaction, function(retval, msg) {
-                switch(retval) {
+                if (!msg) msg = self.queue_msg(retval, msg);
+                switch (retval) {
                     case constants.ok:
-                        plugins.run_hooks("queue_ok", self, msg || 'Message Queued (' + self.transaction.uuid + ')');
+                        if (!msg) msg = self.queue_msg(retval, msg);
+                        plugins.run_hooks('queue_ok', self, msg);
                         break;
                     case constants.deny:
-                        self.respond(550, msg || "Message denied", function() {
+                        if (!msg) msg = self.queue_msg(retval, msg);
+                        self.respond(550, msg, function() {
                             self.msg_count.reject++;
-                            self.reset_transaction(function () { self.resume();});
+                            self.reset_transaction(function () {
+                                self.resume();
+                            });
                         });
                         break;
                     default:
@@ -1620,39 +1662,43 @@ Connection.prototype.queue_outbound_respond = function(retval, msg) {
 
 Connection.prototype.queue_respond = function(retval, msg) {
     var self = this;
+    if (!msg) msg = this.queue_msg(retval, msg);
+    this.store_queue_result(retval, msg);
+
     if (retval !== constants.ok) {
-        this.lognotice('queue code=' + constants.translate(retval) + ' msg="' + (msg || '') + '"');
+        this.lognotice('queue code=' + constants.translate(retval) + ' msg="' + msg + '"');
     }
     switch (retval) {
         case constants.ok:
-            plugins.run_hooks("queue_ok", this, msg || 'Message Queued (' + self.transaction.uuid + ')');
+            plugins.run_hooks('queue_ok', this, msg);
             break;
         case constants.deny:
-            this.respond(550, msg || "Message denied", function() {
+            this.respond(550, msg, function() {
                 self.msg_count.reject++;
                 self.reset_transaction(function () { self.resume();});
             });
             break;
         case constants.denydisconnect:
-            this.respond(550, msg || "Message denied", function() {
+            this.respond(550, msg, function() {
                 self.msg_count.reject++;
                 self.disconnect();
             });
             break;
         case constants.denysoft:
-            this.respond(450, msg || "Message denied temporarily", function() {
+            this.respond(450, msg, function() {
                 self.msg_count.tempfail++;
                 self.reset_transaction(function () { self.resume();});
             });
             break;
         case constants.denysoftdisconnect:
-            this.respond(450, msg || "Message denied temporarily", function() {
+            this.respond(450, msg, function() {
                 self.msg_count.tempfail++;
                 self.disconnect();
             });
             break;
         default:
-            this.respond(451, msg || "Queuing declined or disabled, try later", function() {
+            if (!msg) msg = 'Queuing declined or disabled, try later';
+            this.respond(451, msg, function() {
                 self.msg_count.tempfail++;
                 self.reset_transaction(function () { self.resume();});
             });
