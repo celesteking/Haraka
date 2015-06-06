@@ -113,22 +113,21 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
 
 exports.hook_mail = function (next, connection, params) {
     var plugin = this;
+    var txn = connection.transaction;
+    if (!txn) return next();
 
     // bypass auth'ed or relay'ing hosts if told to
     if (exports.bypass_hosts(connection)) {
-        connection.results.add(plugin, {skip: 'envelope_host_bypass'});
+        txn.results.add(plugin, {skip: 'envelope_host_bypass'});
         return next(CONT, 'host bypass requested');
     }
 
     // For inbound message from a private IP, skip MAIL FROM check
     if (!connection.relaying &&
          net_utils.is_private_ip(connection.remote_ip)) {
-        connection.results.add(plugin, {skip: 'envelope_private_ip'});
+        txn.results.add(plugin, {skip: 'envelope_private_ip'});
         return next();
     }
-
-    var txn = connection.transaction;
-    if (!txn) return next();
 
     var mfrom = params[0].address();
     var host = params[0].host;
