@@ -1581,6 +1581,7 @@ Connection.prototype.queue_msg = function (retval, msg) {
 
 Connection.prototype.store_queue_result = function (retval, msg) {
     var plugin = {name: 'queue'};
+
     switch (retval) {
         case constants.ok:
             this.transaction.results.add(plugin, { pass: msg });
@@ -1590,6 +1591,8 @@ Connection.prototype.store_queue_result = function (retval, msg) {
         case constants.denysoft:
         case constants.denysoftdisconnect:
             this.transaction.results.add(plugin, { fail: msg });
+            break;
+        case constants.cont:
             break;
         default:
             this.transaction.results.add(plugin, { msg: msg });
