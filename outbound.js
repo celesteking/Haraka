@@ -1536,7 +1536,7 @@ HMailItem.prototype.temp_fail = function (err, extra) {
     
     var delay = Math.pow(2, (this.num_failures + 5));
 
-    plugins.run_hooks('deferred', this, {delay: delay, err: err});
+    plugins.run_hooks('deferred', this, {delay: delay, err: err, extra: extra});
 };
 
 HMailItem.prototype.deferred_respond = function (retval, msg, params) {
