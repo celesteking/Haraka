@@ -74,14 +74,14 @@ logger.dump_logs = function (exit) {
     return true;
 };
 
-logger.log = function (level, data) {
+logger.log = function (level, data, logobj) {
     if (level === 'PROTOCOL') {
         data = data.replace(/\n/g, '\\n\n');
     }
     data = data.replace(/\r/g, '\\r')
                .replace(/\n$/, '');
 
-    var item = { 'level' : level, 'data'  : data };
+    var item = { 'level' : level, 'data'  : data, obj: logobj};
 
     // buffer until plugins are loaded
     if (!plugins || !plugins.plugin_list) {
@@ -95,7 +95,7 @@ logger.log = function (level, data) {
         plugins.run_hooks('log', logger, log_item);
     }
 
-    plugins.run_hooks('log', logger, item );
+    plugins.run_hooks('log', logger, item);
     return true;
 };
 
@@ -201,7 +201,9 @@ logger.log_if_level = function (level, key, plugin) {
                 str += util.inspect(data);
             }
         }
-        logger.log(level, [levelstr, uuidstr, pluginstr, str].join(' '));
+        var stripper = function(str) {return str.substring(1, str.length - 1) };
+        logger.log(level, [levelstr, uuidstr, pluginstr, str].join(' '),
+                {level: stripper(levelstr), uuid: stripper(uuidstr), origin: stripper(pluginstr), msg: str});
         return true;
     };
 };
