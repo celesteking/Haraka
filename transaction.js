@@ -34,6 +34,11 @@ function Transaction() {
         tempfail: 0,
         reject:   0,
     };
+    this.msg_status = {
+        accepted:   false,
+        tempfailed: false,
+        rejected:   false
+    };
 }
 
 exports.Transaction = Transaction;
