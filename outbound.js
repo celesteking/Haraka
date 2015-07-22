@@ -1509,7 +1509,11 @@ HMailItem.prototype.delivered = function (ip, port, mode, host, response, ok_rec
                    ' delay=' + delay +
                    ' fails=' + this.num_failures + 
                    ' rcpts=' + ok_recips.length + '/' + fail_recips.length + '/' + bounce_recips.length);
-    plugins.run_hooks("delivered", this, [host, ip, response, delay, port, mode, ok_recips, secured, authenticated]);
+
+    var hook_params = [host, ip, response, delay, port, mode, ok_recips, secured, authenticated];
+    hook_params.bind_ip = this.bind_ip;
+
+    plugins.run_hooks("delivered", this, hook_params);
 };
 
 HMailItem.prototype.discard = function () {
