@@ -86,7 +86,7 @@ exports.log_transaction = function (next, connection) {
 
     res.txn = {
         uuid: trans.uuid,
-        mail_from: trans.mail_from.original,
+        mail_from: trans.mail_from.address(),
         rcpts: [],
         rcpt_count: trans.rcpt_count,
         header: {},
@@ -95,7 +95,7 @@ exports.log_transaction = function (next, connection) {
     };
 
     trans.rcpt_to.forEach(function (r) {
-        res.txn.rcpts.push(r.original);
+        res.txn.rcpts.push(r.address());
     });
 
     var rcpt_to_info = trans.results.get('rcpt_to.info');
@@ -105,27 +105,33 @@ exports.log_transaction = function (next, connection) {
         res.txn['rcpts_rejected'] = rcpt_to_info.recipients.filter(function(e){ return res.txn.rcpts.indexOf(e) == -1 });
     }
 
-    if (trans.notes.th_table && Object.keys(trans.notes.th_table).length > 0) { // th_table should always exist!
+    if (trans.notes.th_table && Object.keys(trans.notes.th_table).length > 0) {
         res.txn['terminator'] = trans.notes.th_table;
-        var smtp_fwd_notes = connection.transaction.notes.smtp_forward || {};
 
-        if (connection.relaying || (smtp_fwd_notes.rcpt_count && smtp_fwd_notes.rcpt_count.outbound > 0)) {
-            // create outbound object by default for transactions that will require it
-            res['outbound'] = {
-                log: [],
-                rcpt_status: {},
-                status: {
-                    state: (trans.msg_status.tempfailed || trans.msg_status.rejected) ? 'completed' : 'progress',
-                    rcpt: {
-                        count: smtp_fwd_notes.rcpt_count ? smtp_fwd_notes.rcpt_count.outbound : trans.rcpt_count.accept,
-                        delivered: 0,
-                        rejected: 0,
-                        deferred: 0
-                    }
-                }
-            };
+        var smtp_fwd_notes = connection.transaction.notes.smtp_forward;
+
+        if (smtp_fwd_notes && smtp_fwd_notes.recipients) { // store smtp_forward RCPT data
+            res.txn['rcpts_forwarded'] = smtp_fwd_notes.recipients;
         }
     }
+
+    if (connection.relaying || (smtp_fwd_notes && smtp_fwd_notes.rcpt_count && smtp_fwd_notes.rcpt_count.outbound > 0)) {
+        // create outbound object by default for transactions that will require it
+        res['outbound'] = {
+            log: [],
+            rcpt_status: {},
+            status: {
+                state: (trans.msg_status.tempfailed || trans.msg_status.rejected) ? 'completed' : 'progress',
+                rcpt: {
+                    count: (smtp_fwd_notes && smtp_fwd_notes.rcpt_count) ? smtp_fwd_notes.rcpt_count.outbound : trans.rcpt_count.accept,
+                    delivered: 0,
+                    rejected: 0,
+                    deferred: 0
+                }
+            }
+        };
+    }
+
 
     ['From', 'To', 'Subject', 'Message-Id'].forEach(function (h) {
         var r = trans.header.get_decoded(h);
@@ -165,7 +171,7 @@ exports.log_connection = function (next, connection) {
         return next();
     }
 
-    var res = {"plugins": plugin.get_plugin_results(connection)};
+    var res = { "plugins": plugin.get_plugin_results(connection) };
     res.timestamp = new Date().toISOString();
 
     plugin.populate_conn_properties(connection, res);
@@ -185,7 +191,7 @@ exports.log_connection = function (next, connection) {
 exports.log_delivered = function(next, hmail, status) {
     var plugin = this;
 
-    plugin.lognotice("DELIVERED: ip=" + status[1] + ' rcpts=' + status[6].map(function(e){ return e.original }));
+    plugin.lognotice("DELIVERED: ip=" + status[1] + ' rcpts=' + status[6].map(function(e){ return e.address() }));
     if (!hmail.todo.notes.th_table)
         plugin.logwarn("DELIVERED: It looks like a LOCAL bounce");
 //    plugin.lognotice("HMAIL: " + util.inspect(hmail, {depth: 6}));
@@ -215,7 +221,11 @@ exports.log_delivered = function(next, hmail, status) {
             var addr =  (e.address() || '<>');
 
             new_events.push(date_now + ': ' + addr + ': ' + status[2]);
-            rcpt_status[addr] = {state: 'delivered', message: status[2], time: date_now, ip: status[1] };
+
+            var rstatus = {state: 'delivered', message: status[2], time: date_now, ip: status[1] };
+            if (status.bind_ip) { rstatus.bind_ip = status.bind_ip }
+
+            rcpt_status[addr] = rstatus;
         });
     }
 
@@ -247,7 +257,7 @@ exports.log_deferred = function(next, hmail, opts){
     if (!hmail.todo.notes.th_table)
         plugin.logwarn("Deferred: It looks like a LOCAL bounce");
 
-    var deferred_addrs = error.rcpt || hmail.todo.rcpt_to;
+    var deferred_addrs = (error && error.rcpt) || hmail.todo.rcpt_to;
 
     var txn_uuid = hmail.todo.notes.txn_uuid;
     if (!txn_uuid) {
@@ -705,6 +715,7 @@ exports.process_transaction_results = function(pir, txr, name) {
     switch (name) {
         case 'spf':
             delete txr.spf.scope; // we already know the scope
+            pir['spf'] = pir['spf'] || {}; // work around missing connection.spf result
             pir['spf']['mfrom'] = txr.spf;
             delete txr.spf;
             break;
