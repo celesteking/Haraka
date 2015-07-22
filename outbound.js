@@ -358,6 +358,7 @@ exports.send_email = function () {
     // set MAIL FROM address, and parse if it's not an Address object
     if (from instanceof Address) {
         transaction.mail_from = from;
+        if (from.hack) transaction.notes = from.hack;
     }
     else {
         try {
@@ -1466,6 +1467,8 @@ HMailItem.prototype.bounce_respond = function (retval, msg) {
     }
     
     var from = new Address ('<>');
+    if (msg && msg.notes) from.hack = msg.notes; // FIXME: special hack to pass params to bounce creation routine
+
     var recip = new Address (this.todo.mail_from.user, this.todo.mail_from.host);
     populate_bounce_message(from, recip, err, this, function (err, data_lines) {
         if (err) {
@@ -1506,7 +1509,11 @@ HMailItem.prototype.delivered = function (ip, port, mode, host, response, ok_rec
                    ' delay=' + delay +
                    ' fails=' + this.num_failures + 
                    ' rcpts=' + ok_recips.length + '/' + fail_recips.length + '/' + bounce_recips.length);
-    plugins.run_hooks("delivered", this, [host, ip, response, delay, port, mode, ok_recips, secured, authenticated]);
+
+    var hook_params = [host, ip, response, delay, port, mode, ok_recips, secured, authenticated];
+    hook_params.bind_ip = this.bind_ip;
+
+    plugins.run_hooks("delivered", this, hook_params);
 };
 
 HMailItem.prototype.discard = function () {
@@ -1536,7 +1543,7 @@ HMailItem.prototype.temp_fail = function (err, extra) {
     
     var delay = Math.pow(2, (this.num_failures + 5));
 
-    plugins.run_hooks('deferred', this, {delay: delay, err: err});
+    plugins.run_hooks('deferred', this, {delay: delay, err: err, extra: extra});
 };
 
 HMailItem.prototype.deferred_respond = function (retval, msg, params) {
