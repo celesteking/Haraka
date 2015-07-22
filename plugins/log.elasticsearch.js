@@ -76,8 +76,8 @@ exports.log_transaction = function (next, connection) {
     var plugin = this;
     var trans = connection.transaction;
 
-    if (plugin.cfg.ignore_hosts) {
-        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
+    if (plugin.cfg.ignore_hosts && (plugin.cfg.ignore_hosts[connection.remote_host] || plugin.cfg.ignore_hosts[connection.remote_ip])) {
+        return next(CONT, 'not logging ignored host');
     }
 
     var res = { plugins: plugin.get_plugin_results(connection) };
@@ -161,8 +161,8 @@ exports.log_transaction = function (next, connection) {
 exports.log_connection = function (next, connection) {
     var plugin = this;
 
-    if (plugin.cfg.ignore_hosts) {
-        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
+    if (plugin.cfg.ignore_hosts && (plugin.cfg.ignore_hosts[connection.remote_host] || plugin.cfg.ignore_hosts[connection.remote_ip])) {
+        return next(CONT, 'not logging ignored host');
     }
 
     if (connection.notes.elasticsearch &&
