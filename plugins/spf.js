@@ -66,6 +66,8 @@ exports.load_config = function () {
     if (!plugin.cfg.relay) {
         plugin.cfg.relay = { context: 'sender' };  // default/legacy
     }
+
+    plugin.cfg.lookup_timeout = plugin.cfg.main.lookup_timeout || 30;
 };
 
 exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
@@ -90,7 +92,7 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
         timeout = true;
         connection.logerror(plugin, 'timeout');
         return next();
-    }, 30 * 1000);
+    }, plugin.cfg.lookup_timeout * 1000);
     spf.hello_host = helo;
     spf.check_host(connection.remote_ip, helo, null, function (err, result) {
         if (timer) clearTimeout(timer);
@@ -157,7 +159,7 @@ exports.hook_mail = function (next, connection, params) {
         timeout = true;
         connection.logerror(plugin, 'timeout');
         return next();
-    }, 30 * 1000);
+    }, plugin.cfg.lookup_timeout * 1000);
 
     spf.helo = connection.hello_host;
 
