@@ -182,6 +182,9 @@ exports.auth_login = function(next, connection, params) {
         ( connection.notes.auth_login_asked_login &&
          !connection.notes.auth_login_userlogin))
     {
+        if (!params[0])
+            return next(DENYDISCONNECT, 'bad protocol');
+
         var login = utils.unbase64(params[0]);
         connection.respond(334, LOGIN_STRING2, function () {
             connection.notes.auth_login_userlogin = login;
