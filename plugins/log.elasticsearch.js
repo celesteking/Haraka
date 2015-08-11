@@ -351,6 +351,7 @@ exports.update_es_txn_document = function(opts){
             },
             upsert: {
                 txn: {
+                    type: "outbound-orphan",
                     rcpt_count: {
                         given: opts.rcpt_count || 0
                     }
@@ -378,7 +379,7 @@ exports.update_es_txn_document = function(opts){
 exports.update_es_document = function(opts){
     var plugin = this;
 
-    plugin.lognotice("updating idx=" + opts.index + ' id=' + opts.id + ' doc=' + util.inspect(opts.document, {depth: 5}));
+    plugin.lognotice("updating idx=" + opts.index + ' id=' + opts.id + ' doc=' + util.inspect(opts.document, {depth: 5}).replace(/\n/g, ' '));
 
     plugin.es.update({
         index: opts.index,
