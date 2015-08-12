@@ -29,7 +29,8 @@ exports.load_karma_ini = function () {
         booleans: [
             '+asn.enable',
             '-relaying.karma_rfc',
-            '-relaying.spammy_tld'
+            '-relaying.spammy_tld',
+            '-relaying.env_user_match'
         ]
     }, function () {
         plugin.load_karma_ini();
@@ -389,7 +390,7 @@ exports.hook_rcpt = function (next, connection, params) {
 
     // odds of from_user=rcpt_user in ham: < 1%, in spam > 40%
     var txn = connection.transaction;
-    if (txn && txn.mail_from && txn.mail_from.user === rcpt.user) {
+    if (txn && txn.mail_from && txn.mail_from.user === rcpt.user && !(connection.relaying && !plugin.cfg.relaying.env_user_match)) {
         connection.results.add(plugin, {fail: 'env_user_match'});
         connection.results.incr(plugin, {connect: -1});
     }
@@ -409,7 +410,7 @@ exports.hook_rcpt_ok = function (next, connection, rcpt) {
     var plugin = this;
 
     var txn = connection.transaction;
-    if (txn && txn.mail_from && txn.mail_from.user === rcpt.user) {
+    if (txn && txn.mail_from && txn.mail_from.user === rcpt.user && !(connection.relaying && !plugin.cfg.relaying.env_user_match)) {
         connection.results.add(plugin, {fail: 'env_user_match'});
         connection.results.incr(plugin, {connect: -1});
     }
