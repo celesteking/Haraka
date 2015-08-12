@@ -28,7 +28,9 @@ exports.load_karma_ini = function () {
     plugin.cfg = plugin.config.get('karma.ini', {
         booleans: [
             '+asn.enable',
-        ],
+            '-relaying.karma_rfc',
+            '-relaying.spammy_tld'
+        ]
     }, function () {
         plugin.load_karma_ini();
     });
@@ -366,15 +368,17 @@ exports.hook_mail = function (next, connection, params) {
 
     plugin.check_spammy_tld(params[0], connection);
 
-    // look for an illegal (RFC 5321,(2)821) space in envelope from
-    var full_from = connection.current_line;
-    if (full_from.toUpperCase().substring(0,11) !== 'MAIL FROM:<') {
-        connection.loginfo(plugin, "RFC ignorant env addr format: " + full_from );
-        connection.results.add(plugin, {fail: 'rfc5321.MailFrom'});
-    }
+    if (!(connection.relaying && !plugin.cfg.relaying.karma_rfc)) {
+        // look for an illegal (RFC 5321,(2)821) space in envelope from
+        var full_from = connection.current_line;
+        if (full_from.toUpperCase().substring(0,11) !== 'MAIL FROM:<') {
+            connection.loginfo(plugin, "RFC ignorant env addr format: " + full_from );
+            connection.results.add(plugin, {fail: 'rfc5321.MailFrom'});
+        }
 
-    plugin.check_awards(connection);
-    connection.results.add(plugin, {emit: 1});
+        plugin.check_awards(connection);
+        connection.results.add(plugin, {emit: 1});
+    }
 
     return plugin.should_we_deny(next, connection, 'mail');
 };
@@ -743,6 +747,9 @@ exports.check_spammy_tld = function (mail_from, connection) {
     if (!plugin.cfg.spammy_tlds) { return; }
     if (mail_from.isNull()) { return; }         // null sender (bounce)
 
+    if (connection.relaying && !plugin.cfg.relaying.spammy_tld)
+        return;
+
     var from_tld = mail_from.host.split('.').pop();
     // connection.logdebug(plugin, "from_tld: " + from_tld);
 
@@ -755,6 +762,9 @@ exports.check_spammy_tld = function (mail_from, connection) {
 
 exports.check_syntax_RcptTo = function (connection) {
     var plugin = this;
+
+    if (connection.relaying && !plugin.cfg.relaying.karma_rfc)
+        return;
 
     // look for an illegal (RFC 5321,(2)821) space in envelope recipient
     var full_rcpt = connection.current_line;
