@@ -198,7 +198,7 @@ exports.log_delivered = function(next, hmail, status) {
 
     var txn_uuid = hmail.todo.notes.txn_uuid;
     if (!txn_uuid) {
-        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail));
+        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail).replace(/\n/g, ' '));
         return next();
     }
 
@@ -261,7 +261,7 @@ exports.log_deferred = function(next, hmail, opts){
 
     var txn_uuid = hmail.todo.notes.txn_uuid;
     if (!txn_uuid) {
-        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail));
+        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail).replace(/\n/g, ' '));
         return next();
     }
 
@@ -302,7 +302,7 @@ exports.log_bounced = function(next, hmail, error){
 
     var txn_uuid = hmail.todo.notes.txn_uuid;
     if (!txn_uuid) {
-        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail));
+        plugin.logwarn(hmail, "Can't update orphan: " + util.inspect(hmail).replace(/\n/g, ' '));
         return next();
     }
 
