@@ -284,7 +284,7 @@ exports.hook_lookup_rdns = function (next, connection) {
             }
 
             var dbr = replies[1];   // 2nd pos. of multi reply is karma object
-            if (dbr === null) {
+            if (dbr == null || dbr.penalty_start_ts == null) {
                 plugin.init_ip(dbkey, rip, expire);
                 return next();
             }
