@@ -188,9 +188,6 @@ SPF.prototype.check_host = function (ip, domain, mail_from, cb) {
             }
         }
 
-        if (txt_rrs === undefined)
-            return cb(null, self.SPF_NONE); // workaround for js dns module
-
         var i, spf_record, match;
         for (i=0; i < txt_rrs.length; i++) {
             // Node 0.11.x compatibility
