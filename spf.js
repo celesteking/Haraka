@@ -6,7 +6,7 @@ var util = require('util');
 var ipaddr = require('ipaddr.js');
 
 var dns;
-if (process.version.match(/^v0\.10\.[3-9]\d+/) && os.type() == 'Linux' && os.release().match(/^2\.\6.\d+/)) {
+if (process.version.match(/^v0\.10\.[3-9]\d+/) && os.type() == 'Linux' && os.release().match(/^2\.6\.\d+/)) {
     // assume it's centos 6 with node 0.10.3x
     util.debug('Workaround: Loading native-dns replacement in SPF module');
     dns = require('native-dns');
