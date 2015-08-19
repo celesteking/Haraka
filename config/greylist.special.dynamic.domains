@@ -1,0 +1,5 @@
+# Put domains that should be always treated as dynamic here.
+# Pattern is matched at the end of rdns
+
+# SiteGround VPS service
+sgvps.net
