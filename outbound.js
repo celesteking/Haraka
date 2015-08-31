@@ -58,6 +58,9 @@ exports.load_config = function () {
     if (!cfg.ipv6_enabled && config.get('outbound.ipv6_enabled')) {
         cfg.ipv6_enabled = true;
     }
+    if (!cfg.received_header) {
+        cfg.received_header = config.get('outbound.received_header') || 'Haraka outbound';
+    }
 };
 exports.load_config();
 
@@ -474,7 +477,7 @@ exports.send_trans_email = function (transaction, next) {
         }
 
         if (next) {
-            next(constants.ok, "Message Queued (" + transaction.uuid + ")");
+            next(constants.ok, "Message Queued");
         }
     });
 };
@@ -636,7 +639,7 @@ function HMailItem (filename, path, notes) {
     this.file_size    = 0;
     this.next_cb      = dummy_func;
     this.bounce_error = null;
-
+    this.hook         = null;
     this.size_file();
 }
 

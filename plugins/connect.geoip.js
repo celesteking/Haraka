@@ -105,7 +105,11 @@ exports.get_maxmind_asn = function (connection) {
         return;
     }
 
-    connection.results.add(plugin,
+    var report_as = plugin;
+    if (plugin.cfg.asn && plugin.cfg.asn.report_as) {
+        report_as = { name: plugin.cfg.asn.report_as };
+    }
+    connection.results.add(report_as,
             { emit: true, asn: match[1], org: match[2] });
 };
 
@@ -178,7 +182,7 @@ exports.lookup_geoip = function (next, connection) {
     }
 
     plugin.calculate_distance(connection, r.ll, function (err, distance) {
-        show.push(r.distance+'km');
+        show.push(distance+'km');
         connection.results.add(plugin, {human: show.join(', '), emit:true});
         return next();
     });
@@ -217,14 +221,18 @@ exports.get_geoip_maxmind = function (ip) {
         result = ipv6 ? plugin.maxmind.getLocationV6(ip)
                       : plugin.maxmind.getLocation(ip);
     }
-    catch (e) { plugin.logerror(e); }
+    catch (e) { 
+        plugin.logerror(e.message); 
+    }
     if (!result) {
         try {
             // then try GeoIP country
             result = ipv6 ? plugin.maxmind.getCountryV6(ip)
                           : plugin.maxmind.getCountry(ip);
         }
-        catch (e) { plugin.logerror(e); }
+        catch (e) { 
+            plugin.logerror(e.message); 
+        }
     }
     return result;
 };
@@ -258,8 +266,7 @@ exports.add_headers = function (next, connection) {
     var received = [];
 
     var rh = plugin.received_headers(connection);
-    if ( rh) { received.push(rh); }
-    if (!rh) { plugin.user_agent(connection); } // No received headers.
+    if (rh) received.push(rh);
 
     var oh = plugin.originating_headers(connection);
     if (oh) { received.push(oh); }
@@ -351,10 +358,13 @@ exports.received_headers = function (connection) {
         if (net_utils.is_private_ip(match[1])) continue;  // exclude private IP
 
         var gi = plugin.get_geoip(match[1]);
-        var country = gi.countryCode || gi.code || 'UNKNOWN';
-        connection.loginfo(plugin, 'received=' + match[1] +
-                ' country=' + country);
-        results.push(match[1] + ':' + country);
+        var country = gi ? (gi.countryCode || gi.code) : '';
+        var logmsg = 'received=' + match[1];
+        if (country) {
+            logmsg += ' country=' + country;
+            results.push(match[1] + ':' + country);
+        }
+        connection.loginfo(plugin, logmsg);
     }
     return results;
 };

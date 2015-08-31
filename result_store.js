@@ -3,6 +3,7 @@
 'use strict';
 
 var config = require('./config');
+var util = require('util');
 
 // see docs in docs/Results.md
 var append_lists = ['msg','pass','fail','skip','err'];
@@ -36,11 +37,32 @@ ResultStore.prototype.has = function (plugin, list, search) {
     if (Array.isArray(result[list])) {
         for (var i=0; i<result[list].length; i++) {
             var item = result[list][i];
-            if (typeof search === 'string' && search === item) return true;
-            if (typeof search === 'object' && item.match(search)) return true;
+            switch (typeof search) {
+                case 'string':
+                case 'number':
+                case 'boolean':
+                    if (search === item) return true;
+                    break;
+                case 'object':
+                    if (item.match(search)) return true;
+                    break;
+            }
         }
     }
     return false;
+};
+
+ResultStore.prototype.redis_publish = function (name, obj) {
+    if (!this.conn.server || !this.conn.server.notes) return;
+    if (!this.conn.server.notes.redis) return;
+
+    var channel = 'result-' +
+        (this.conn.transaction ?
+         this.conn.transaction.uuid :
+         this.conn.uuid);
+
+    this.conn.server.notes.redis.publish(channel,
+            JSON.stringify({ plugin: name, result: obj }));
 };
 
 ResultStore.prototype.add = function (plugin, obj) {
@@ -51,11 +73,18 @@ ResultStore.prototype.add = function (plugin, obj) {
         this.store[name] = result;
     }
 
+    this.redis_publish(name, obj);
+
     // these are arrays each invocation appends to
     for (var i=0; i < append_lists.length; i++) {
         var key = append_lists[i];
         if (!obj[key]) continue;
-        result[key].push(obj[key]);
+        if (Array.isArray(obj[key])) {
+            result[key] = result[key].concat(obj[key]);
+        }
+        else {
+            result[key].push(obj[key]);
+        }
     }
 
     // these arrays are overwritten when passed
@@ -71,22 +100,7 @@ ResultStore.prototype.add = function (plugin, obj) {
         result[key] = obj[key];            // save the rest
     }
 
-    // collate results
-    result.human = obj.human;
-    if (!result.human) {
-        var r = this.private_collate(result, name);
-        result.human = r.join(', ');
-        result.human_html = r.join(', \t ');
-    }
-
-    // logging results
-    if (obj.emit && result.human.trim().length > 0) this.conn.loginfo(plugin, result.human);  // by request
-    if (obj.err)  this.conn.logerror(plugin, obj.err);      // by default
-    if (!obj.emit && !obj.err) {                            // by config
-        var pic = cfg[name];
-        if (pic && pic.debug) this.conn.logdebug(plugin, result.human);
-    }
-    return this.human;
+    return this._log(plugin, result, obj);
 };
 
 ResultStore.prototype.incr = function (plugin, obj) {
@@ -113,10 +127,19 @@ ResultStore.prototype.push = function (plugin, obj) {
         this.store[name] = result;
     }
 
+    this.redis_publish(name, obj);
+
     for (var key in obj) {
         if (!result[key]) result[key] = [];
-        result[key].push( obj[key] );
+        if (Array.isArray(obj[key])) {
+            result[key] = result[key].concat(obj[key]);
+        }
+        else {
+            result[key].push(obj[key]);
+        }
     }
+
+    return this._log(plugin, result, obj);
 };
 
 ResultStore.prototype.collate = function (plugin) {
@@ -143,7 +166,6 @@ ResultStore.prototype.get_all = function () {
 };
 
 ResultStore.prototype.private_collate = function (result, name) {
-
     var r = [], order = [], hide = [];
 
     if (cfg[name]) {
@@ -153,9 +175,11 @@ ResultStore.prototype.private_collate = function (result, name) {
 
     // anything not predefined in the result was purposeful, show it first
     for (var key in result) {
+        if (key[0] === '_') continue;  // ignore 'private' keys
         if (all_opts.indexOf(key) !== -1) continue;
         if (hide.length && hide.indexOf(key) !== -1) continue;
         if (Array.isArray(result[key]) && result[key].length === 0) continue;
+        if (typeof result[key] === 'object') continue;
         r.push(key + ': ' + result[key]);
     }
 
@@ -173,6 +197,35 @@ ResultStore.prototype.private_collate = function (result, name) {
     }
 
     return r;
+};
+
+ResultStore.prototype._log = function (plugin, result, obj) {
+    var name = plugin.name;
+
+    // collate results
+    result.human = obj.human;
+    if (!result.human) {
+        var r = this.private_collate(result, name);
+        result.human = r.join(', ');
+        result.human_html = r.join(', \t ');
+    }
+
+    // logging results
+    if (obj.emit  && result.human.trim().length > 0) this.conn.loginfo(plugin, result.human);  // by request
+    if (obj.err) {
+        // Handle error objects by logging the message
+        if (util.isError(obj.err)) {
+            this.conn.logerror(plugin, obj.err.message);
+        }
+        else {
+            this.conn.logerror(plugin, obj.err);
+        }
+    }
+    if (!obj.emit && !obj.err) {                            // by config
+        var pic = cfg[name];
+        if (pic && pic.debug) this.conn.logdebug(plugin, result.human);
+    }
+    return this.human;
 };
 
 module.exports = ResultStore;
