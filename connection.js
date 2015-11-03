@@ -1729,7 +1729,7 @@ Connection.prototype.queue_ok_respond = function (retval, msg, params) {
     this.lognotice('queue_ok code=' + constants.translate(retval) + ' msg="' + (params || '') + '"');
     this.respond(250, params, function() {
         self.msg_count.accept++;
-        self.transaction.msg_status.accepted = true;
+        if (self.transaction) self.transaction.msg_status.accepted = true;
         self.reset_transaction(function () { self.resume();});
     });
 };
