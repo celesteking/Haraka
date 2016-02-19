@@ -44,6 +44,8 @@ var states = exports.states = {
     STATE_DISCONNECTED:    100,
 };
 
+var nextTick = setImmediate || process.nextTick;
+
 // copy logger methods into Connection:
 for (var key in logger) {
     if (!/^log\w/.test(key)) continue;
@@ -250,7 +252,7 @@ Connection.prototype.process_line = function (line) {
     if (/[^\x00-\x7F]/.test(this.current_line)) {
         // See if this is a TLS handshake
         var buf = new Buffer(this.current_line.substr(0,3), 'binary');
-        if (buf[0] === 0x16 && buf[1] === 0x03 && 
+        if (buf[0] === 0x16 && buf[1] === 0x03 &&
            (buf[2] === 0x00 || buf[2] === 0x01)) // SSLv3/TLS1.x format
         {
             // Nuke the current input buffer to prevent processing further input
@@ -371,7 +373,7 @@ Connection.prototype._process_data = function() {
                 this.logdebug('[early_talker] state=' + this.state + ' esmtp=' + this.esmtp + ' line="' + this_line + '"');
             }
             this.early_talker = true;
-            self._process_data();
+            nextTick(function () { self._process_data() });
             break;
         }
         else if ((this.state === states.STATE_PAUSE || this.state === states.STATE_PAUSE_SMTP) && this.esmtp) {
@@ -412,7 +414,7 @@ Connection.prototype._process_data = function() {
                             ' esmtp=' + this.esmtp + ' line="' + this_line + '"');
                 }
                 this.early_talker = true;
-                self._process_data();
+                nextTick(function () { self._process_data() });
             }
             break;
         }
@@ -467,7 +469,8 @@ Connection.prototype.respond = function(code, msg, func) {
         messages = msg.toString().split(/\n/).filter(function (msg) {
             return /\S/.test(msg);
         });
-    } else {
+    }
+    else {
         // copy
         messages = msg.slice().filter(function (msg) { return /\S/.test(msg);});
     }
@@ -569,6 +572,8 @@ Connection.prototype.tran_uuid = function () {
 
 Connection.prototype.reset_transaction = function(cb) {
     if (this.transaction && this.transaction.resetting === false) {
+        // Pause connection to allow the hook to complete
+        this.pause();
         this.transaction.resetting = true;
         plugins.run_hooks('reset_transaction', this, cb);
     }
@@ -584,21 +589,23 @@ Connection.prototype.reset_transaction_respond = function (retval, msg, cb) {
         this.transaction = null;
     }
     if (cb) cb();
+    // Allow the connection to continue
+    this.resume();
 };
 
 Connection.prototype.init_transaction = function(cb) {
-   var self = this;
-   this.reset_transaction(function () {
-       self.transaction = trans.createTransaction(self.tran_uuid());
-       // Catch any errors from the message_stream
-       self.transaction.message_stream.on('error', function (err) {
-           self.logcrit('message_stream error: ' + err.message);
-           self.respond('421', 'Internal Server Error', function () {
-               self.disconnect();
-           });
-       });
-       self.transaction.results = new ResultStore(self);
-       if (cb) cb();
+    var self = this;
+    this.reset_transaction(function () {
+        self.transaction = trans.createTransaction(self.tran_uuid());
+        // Catch any errors from the message_stream
+        self.transaction.message_stream.on('error', function (err) {
+            self.logcrit('message_stream error: ' + err.message);
+            self.respond('421', 'Internal Server Error', function () {
+                self.disconnect();
+            });
+        });
+        self.transaction.results = new ResultStore(self);
+        if (cb) cb();
     });
 };
 
@@ -1416,10 +1423,10 @@ Connection.prototype.cmd_data = function(args) {
         return this.respond(503, "MAIL required first");
     }
     if (!this.transaction.rcpt_to.length) {
-        this.errors++;
         if (this.pipelining) {
             return this.respond(554, "No valid recipients");
         }
+        this.errors++;
         return this.respond(503, "RCPT required first");
     }
 

@@ -108,6 +108,7 @@ The MX record is sent via next(OK, mx) and can be one of:
 following optional properies:
        * `port` to specify an alternate port
        * `bind` to specify an outbound IP address to bind to
+       * `bind_helo` to specify an outbound helo for IP address to bind to
        * `using_lmtp` boolean to specify that delivery should be attempted using 
           LMTP instead of SMTP.
        *  `auth_user` to specify an AUTH username (required if AUTH is desired)
@@ -180,17 +181,19 @@ different IP addresses based on sender, domain or some other identifier.
 To do this, the IP address that you want to use *must* be bound to an 
 interface (or alias) on the local system.
 
-As described above the outbound IP can be set using the `bind` parameter 
-returned my the `get_mx` hook or during the reception of the message you
-can set a transaction note in a plugin to tell Haraka which outbound IP 
+As described above the outbound IP can be set using the `bind` parameter
+and also the outbound helo for the IP can be set using the `bind_ehlo` 
+parameter returned my the `get_mx` hook or during the reception of the message 
+you can set a transaction note in a plugin to tell Haraka which outbound IP 
 address you would like it to use when it tries to deliver the message:
 
 `````
 connection.transaction.notes.outbound_ip = '1.2.3.4';
+connection.transaction.notes.outbound_helo = 'mail-2.example.com';
 `````
 
-Note: if the `get_mx` hook returns a `bind` parameter, then this will be 
-used in preference to the transaction note.
+Note: if the `get_mx` hook returns a `bind` and `bind_helo` parameter, then
+this will be used in preference to the transaction note.
 
 AUTH
 ----
@@ -273,3 +276,16 @@ should queueing to disk fail e.g:
 
     outbound.send_email(from, to, contents);
 
+
+In case you are passing your content dot-stuffed (a dot at the start of a line
+is doubled, like it is in SMTP conversation, 
+see https://tools.ietf.org/html/rfc2821#section-4.5.2), you should pass the
+```dot_stuffed: true``` option, like so:
+    
+    outbound.send_email(from, to, contents, outnext, { dot_stuffed: true });
+
+
+In case you need notes in the new transaction that `send_email()` creates, you should pass the
+```notes``` option, like so:
+
+    outbound.send_email(from, to, contents, outnext, { notes: transaction.notes });

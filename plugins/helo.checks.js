@@ -2,6 +2,7 @@
 // Check various bits of the HELO string
 
 var dns       = require('dns');
+var async     = require('async');
 var net_utils = require('./net_utils');
 var utils     = require('./utils');
 
@@ -160,7 +161,7 @@ exports.valid_hostname = function (next, connection, helo) {
 
     if (plugin.should_skip(connection, 'valid_hostname')) { return next(); }
 
-    if (net_utils.is_ipv4_literal(helo)) {
+    if (net_utils.is_ip_literal(helo)) {
         connection.results.add(plugin, {skip: 'valid_hostname(literal)'});
         return next();
     }
@@ -219,8 +220,8 @@ exports.rdns_match = function (next, connection, helo) {
         return next();
     }
 
-    if (net_utils.is_ipv4_literal(helo)) {
-        connection.results.add(plugin, {skip: 'rdns_match(literal)'});
+    if (net_utils.is_ip_literal(helo)) {
+        connection.results.add(plugin, {fail: 'rdns_match(literal)'});
         return next();
     }
 
@@ -250,7 +251,7 @@ exports.bare_ip = function (next, connection, helo) {
 
     // RFC 2821, 4.1.1.1  Address literals must be in brackets
     // RAW IPs must be formatted: "[1.2.3.4]" not "1.2.3.4" in HELO
-    if(/^\d+\.\d+\.\d+\.\d+$/.test(helo)) {
+    if (net_utils.get_ipany_re('^(?:IPv6:)?','$','').test(helo)) {
         connection.results.add(plugin, {fail: 'bare_ip(invalid literal)'});
         if (plugin.cfg.reject.bare_ip) {
             return next(DENY, "Invalid address format in HELO");
@@ -273,7 +274,7 @@ exports.dynamic = function (next, connection, helo) {
         return next();
     }
 
-    if (/^\[?\d+\.\d+\.\d+\.\d+\]?$/.test(helo)) {
+    if (net_utils.get_ipany_re('^\\[?(?:IPv6:)?','\\]?$','').test(helo)) {
         connection.results.add(plugin, {skip: 'dynamic(literal)'});
         return next();
     }
@@ -295,7 +296,7 @@ exports.big_company = function (next, connection, helo) {
 
     if (plugin.should_skip(connection, 'big_company')) { return next(); }
 
-    if (net_utils.is_ipv4_literal(helo)) {
+    if (net_utils.is_ip_literal(helo)) {
         connection.results.add(plugin, {skip: 'big_co(literal)'});
         return next();
     }
@@ -306,7 +307,7 @@ exports.big_company = function (next, connection, helo) {
     }
 
     if (!plugin.cfg.bigco[helo]) {
-        connection.results.add(plugin, {skip: 'big_co(not)'});
+        connection.results.add(plugin, {pass: 'big_co(not)'});
         return next();
     }
 
@@ -340,7 +341,7 @@ exports.literal_mismatch = function (next, connection, helo) {
 
     if (plugin.should_skip(connection, 'literal_mismatch')) { return next(); }
 
-    var literal = /^\[(\d+\.\d+\.\d+\.\d+)\]$/.exec(helo);
+    var literal = net_utils.get_ipany_re('^\\[(?:IPv6:)?','\\]$','').exec(helo);
     if (!literal) {
         connection.results.add(plugin, {pass: 'literal_mismatch'});
         return next();
@@ -387,7 +388,7 @@ exports.forward_dns = function (next, connection, helo) {
         return next();
     }
 
-    if (net_utils.is_ipv4_literal(helo)) {
+    if (net_utils.is_ip_literal(helo)) {
         connection.results.add(plugin, {skip: 'forward_dns(literal)'});
         return next();
     }
@@ -457,8 +458,8 @@ exports.proto_mismatch = function (next, connection, helo, proto) {
     var r = connection.results.get('helo.checks');
     if (!r || (r && !r.helo_host)) { return next(); }
 
-    if ((connection.esmtp && proto === 'smtp') || 
-        (!connection.esmtp && proto === 'esmtp')) 
+    if ((connection.esmtp && proto === 'smtp') ||
+        (!connection.esmtp && proto === 'esmtp'))
     {
         connection.results.add(plugin, {fail: 'proto_mismatch(' + proto + ')'});
         if (plugin.cfg.reject.proto_mismatch) {
@@ -523,10 +524,23 @@ exports.get_a_records = function (host, cb) {
     if (!/\.$/.test(host)) { host = host + '.'; }
 
     // do the queries
-    dns.resolve(host, function(err, ips) {
+    net_utils.get_ips_by_host(host, function (errs, ips) {
+        // results is now equals to: {queryA: 1, queryAAAA: 2}
         if (timed_out) { return; }
         if (timer) { clearTimeout(timer); }
-        if (err) { return cb(err, ips); }
+        if (errs) {
+            var err = '';
+            for (var e=0; e < errs.length; e++) {
+                switch (errs[e]) {
+                    case 'queryAaaa ENODATA':
+                    case 'queryAaaa ENOTFOUND':
+                        break;
+                    default:
+                        err += errs[e];
+                }
+            }
+        }
+        if (!ips.length && err) { return cb(err, ips); }
         // plugin.logdebug(plugin, host + ' => ' + ips);
         // return the DNS results
         return cb(null, ips);

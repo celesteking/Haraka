@@ -32,7 +32,7 @@ exports.load_bounce_bad_rcpt = function () {
     for (var i=0; i < new_list.length; i++) {
         invalids[new_list[i]] = true;
     }
-    
+
     plugin.cfg.invalid_addrs = invalids;
 };
 
@@ -217,7 +217,7 @@ exports.non_local_msgid = function (next, connection) {
     // message should exist as a MIME Encoded part. See here for ideas
     //     http://lamsonproject.org/blog/2009-07-09.html
     //     http://lamsonproject.org/docs/bounce_detection.html
- 
+
     var matches = {}
     find_message_id_headers(matches, transaction.body, connection, plugin);
     matches = Object.keys(matches);
@@ -258,7 +258,7 @@ exports.non_local_msgid = function (next, connection) {
     if (valid_domains.length === 0) {
         transaction.results.add(plugin, { fail: 'Message-ID valid domain' });
         if (!plugin.cfg.reject.non_local_msgid) return next();
-        return next(DENY, 'bounce Message-ID without valid domain, ' + 
+        return next(DENY, 'bounce Message-ID without valid domain, ' +
                 "I didn't send it.");
     }
 
@@ -270,7 +270,7 @@ exports.non_local_msgid = function (next, connection) {
 };
 
 // Lazy regexp to get IPs from Received: headers in bounces
-var received_re = /^Received:.*[\[\(](\d+\.\d+\.\d+\.\d+|.*:.*)[\]\)]/mig;
+var received_re = net_utils.get_ipany_re('^Received:[\\s\\S]*?[\\[\\(](?:IPv6:)?', '[\\]\\)]');
 
 function find_received_headers (ips, body, connection, self) {
     if (!body) return;
@@ -281,7 +281,7 @@ function find_received_headers (ips, body, connection, self) {
         ips[ip] = true;
     }
     for (var i=0,l=body.children.length; i < l; i++) {
-        // Recure to any MIME children
+        // Recurse in any MIME children
         find_received_headers(ips, body.children[i], connection, self);
     }
 }
@@ -336,7 +336,7 @@ exports.bounce_spf = function (next, connection) {
         if (aborted) return;
         var spf = new SPF();
         pending++;
-        spf.check_host(ip, txn.rcpt_to[0].host, txn.rcpt_to[0].address(), 
+        spf.check_host(ip, txn.rcpt_to[0].host, txn.rcpt_to[0].address(),
             function (err, result) {
                 if (aborted) return;
                 pending--;
@@ -344,7 +344,7 @@ exports.bounce_spf = function (next, connection) {
                     connection.logerror(plugin, err.message);
                     return run_cb();
                 }
-                connection.logdebug(plugin, 'ip=' + ip + ' ' + 
+                connection.logdebug(plugin, 'ip=' + ip + ' ' +
                                             'spf_result=' + spf.result(result));
                 switch (result) {
                     case (spf.SPF_NONE):

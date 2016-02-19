@@ -56,7 +56,7 @@ exports.get_options = function (connection) {
     if (connection.remote_ip) options.headers.IP = connection.remote_ip;
 
     var fcrdns = connection.results.get('connect.fcrdns');
-    if (fcrdns && fcrdns.fcrdns) {
+    if (fcrdns && fcrdns.fcrdns && fcrdns.fcrdns[0]) {
         options.headers.Hostname = fcrdns.fcrdns[0];
     }
     else {
@@ -68,8 +68,10 @@ exports.get_options = function (connection) {
     if (connection.hello_host) options.headers.Helo = connection.hello_host;
 
     if (connection.transaction.mail_from) {
-        options.headers.From =
-            connection.transaction.mail_from.address().toString();
+        var mfaddr = connection.transaction.mail_from.address().toString();
+        if (mfaddr) {
+            options.headers.From = mfaddr;
+        }
     }
 
     var rcpts = connection.transaction.rcpt_to;
@@ -104,6 +106,22 @@ exports.hook_data_post = function (next, connection) {
         return next();
     }
 
+    var timer;
+    var timeout = plugin.cfg.timeout || plugin.timeout - 1;
+
+    var calledNext=false;
+    var callNext = function (code, msg) {
+        clearTimeout(timer);
+        if (calledNext) return;
+        calledNext=true;
+        next(code, msg);
+    }
+
+    timer = setTimeout(function () {
+        connection.transaction.results.add(plugin, {err: 'timeout'});
+        callNext();
+    }, timeout * 1000);
+
     var options = plugin.get_options(connection);
 
     var req;
@@ -114,10 +132,10 @@ exports.hook_data_post = function (next, connection) {
             res.on('data', function (chunk) { rawData += chunk; });
             res.on('end', function () {
                 var data = plugin.parse_response(rawData, connection);
-                if (!data) return next();
+                if (!data) return callNext();
                 data.emit = true; // spit out a log entry
 
-                if (!connection.transaction) return next();
+                if (!connection.transaction) return callNext();
                 connection.transaction.results.add(plugin, data);
                 connection.transaction.results.add(plugin, {
                     time: (Date.now() - start)/1000,
@@ -128,21 +146,22 @@ exports.hook_data_post = function (next, connection) {
                         cfg.main.always_add_headers) {
                         plugin.add_headers(connection, data);
                     }
-                    return next();
+                    return callNext();
                 }
 
                 if (data.action !== 'reject') return no_reject();
 
                 if (!authed && !cfg.reject.spam) return no_reject();
                 if (authed && !cfg.reject.authenticated) return no_reject();
-                return next(DENY, cfg.reject.message);
+                return callNext(DENY, cfg.reject.message);
             });
         })
     );
 
     req.on('error', function (err) {
-        connection.logerror(plugin, 'query failed: ' + err.message);
-        return next();
+        if (!connection || !connection.transaction) return;
+        connection.transaction.results.add(plugin, err.message);
+        return callNext();
     });
 };
 

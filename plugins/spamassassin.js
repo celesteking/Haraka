@@ -48,6 +48,7 @@ exports.hook_data_post = function (next, connection) {
     var spamd_response = { headers: {} };
     var state = 'line0';
     var last_header;
+    var start = Date.now();
 
     socket.on('line', function (line) {
         connection.logprotocol(plugin, "Spamd C: " + line + ' state=' + state);
@@ -100,7 +101,7 @@ exports.hook_data_post = function (next, connection) {
             if (spamd_response.headers && spamd_response.headers.Status) {
                 // SpamAssassin appears to have a bug that causes a space not to
                 // be added before autolearn= when the header line has been folded.
-                // So we modify the regexp here not to match autolearn onwards. 
+                // So we modify the regexp here not to match autolearn onwards.
                 var tests = /tests=((?:(?!autolearn)[^ ])+)/.exec(
                         spamd_response.headers.Status.replace(/\r?\n\t/g,'')
                     );
@@ -110,6 +111,11 @@ exports.hook_data_post = function (next, connection) {
 
         // do stuff with the results...
         connection.transaction.notes.spamassassin = spamd_response;
+        connection.results.add(plugin, {
+            time: (Date.now() - start)/1000,
+            hits: spamd_response.hits,
+            flag: spamd_response.flag,
+        });
 
         plugin.fixup_old_headers(connection.transaction);
         plugin.do_header_updates(connection, spamd_response);

@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 
-"use strict";
+'use strict';
 
 var path = require('path');
+var exit = require('exit');
 
 // this must be set before "server.js" is loaded
 process.env.HARAKA = process.env.HARAKA || path.resolve('.');
 try {
     require.paths.push(path.join(process.env.HARAKA, 'node_modules'));
 }
-catch(e) {
-    process.env.NODE_PATH = process.env.NODE_PATH ? 
-            (process.env.NODE_PATH + ':' + path.join(process.env.HARAKA, 'node_modules'))
+catch (e) {
+    process.env.NODE_PATH = process.env.NODE_PATH ?
+            (process.env.NODE_PATH + ':' +
+             path.join(process.env.HARAKA, 'node_modules'))
             :
             (path.join(process.env.HARAKA, 'node_modules'));
     require('module')._initPaths(); // Horrible hack
@@ -36,26 +38,28 @@ process.on('uncaughtException', function (err) {
         logger.logcrit('Caught exception: ' + JSON.stringify(err));
     }
     logger.dump_logs();
-    process.exit(1);
+    exit(1);
 });
 
 ['SIGTERM', 'SIGINT'].forEach(function (sig) {
     process.on(sig, function () {
         process.title = path.basename(process.argv[1], '.js');
         logger.lognotice(sig + ' received');
-        logger.dump_logs(1);
+        logger.dump_logs();
+        exit(1);
     });
 });
 
 process.on('SIGHUP', function () {
     logger.lognotice("Flushing the temp fail queue");
     server.flushQueue();
-})
+});
 
 process.on('exit', function() {
     process.title = path.basename(process.argv[1], '.js');
     logger.lognotice('Shutting down');
     logger.dump_logs();
+    exit(0);
 });
 
 logger.log("NOTICE", "Starting up Haraka version " + exports.version);

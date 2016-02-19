@@ -1,4 +1,5 @@
-"use strict";
+'use strict';
+
 // Mail Body Parser
 var logger = require('./logger');
 var Header = require('./mailheader').Header;
@@ -34,15 +35,17 @@ exports.Body = Body;
 
 Body.prototype.add_filter = function (filter) {
     this.filters.push(filter);
-}
+};
 
 Body.prototype.set_banner = function (banners) {
-    this.add_filter(function (ct, enc, buf) { return insert_banner(ct, enc, buf, banners); });
-}
+    this.add_filter(function (ct, enc, buf) {
+        return insert_banner(ct, enc, buf, banners);
+    });
+};
 
 Body.prototype.parse_more = function (line) {
     return this["parse_" + this.state](line);
-}
+};
 
 Body.prototype.parse_child = function (line) {
     // check for MIME boundary
@@ -67,7 +70,7 @@ Body.prototype.parse_child = function (line) {
     }
     // Pass data into last child
     return this.children[this.children.length - 1].parse_more(line);
-}
+};
 
 Body.prototype.parse_headers = function (line) {
     if (/^\s*$/.test(line)) {
@@ -80,7 +83,7 @@ Body.prototype.parse_headers = function (line) {
         this.header_lines.push(line);
     }
     return line;
-}
+};
 
 Body.prototype.parse_start = function (line) {
     var ct = this.header.get_decoded('content-type') || 'text/plain';
@@ -90,8 +93,8 @@ Body.prototype.parse_start = function (line) {
     if (/text\/html/i.test(ct)) {
         this.is_html = true;
     }
-   
-    enc = enc.toLowerCase().split("\n").pop().trim(); 
+
+    enc = enc.toLowerCase().split("\n").pop().trim();
     if (!enc.match(/^base64|quoted-printable|[78]bit$/i)) {
         logger.logerror("Invalid CTE on email: " + enc + ", using 8bit");
         enc = '8bit';
@@ -104,17 +107,18 @@ Body.prototype.parse_start = function (line) {
         this.decode_function = this.decode_8bit;
     }
     this.ct = ct;
-    
+
+    var match;
     if (/^(?:text|message)\//i.test(ct) && !/^attachment/i.test(cd) ) {
         this.state = 'body';
     }
     else if (/^multipart\//i.test(ct)) {
-        var match = ct.match(/boundary\s*=\s*["']?([^"';]+)["']?/i);
+        match = ct.match(/boundary\s*=\s*["']?([^"';]+)["']?/i);
         this.boundary = match ? match[1] : '';
         this.state = 'multipart_preamble';
     }
     else {
-        var match = cd.match(/name\s*=\s*["']?([^'";]+)["']?/i);
+        match = cd.match(/name\s*=\s*["']?([^'";]+)["']?/i);
         if (!match) {
             match = ct.match(/name\s*=\s*["']?([^'";]+)["']?/i);
         }
@@ -124,9 +128,9 @@ Body.prototype.parse_start = function (line) {
         this.buf_fill = 0;
         this.state = 'attachment';
     }
-    
+
     return this["parse_" + this.state](line);
-}
+};
 
 function _get_html_insert_position (buf) {
     // TODO: consider re-writing this to go backwards from the end
@@ -221,7 +225,7 @@ Body.prototype.parse_end = function (line) {
     if (!line) {
         line = '';
     }
-    
+
     if (this.state === 'attachment') {
         if (this.buf_fill > 0) {
             // see below for why we create a new buffer here.
@@ -233,105 +237,114 @@ Body.prototype.parse_end = function (line) {
     }
 
     // ignore these lines - but we could store somewhere I guess.
-    if (this.body_text_encoded.length && this.bodytext.length === 0) {
-        var buf = this.decode_function(this.body_text_encoded);
+    if (!this.body_text_encoded.length) return line; // nothing to decode
+    if (this.bodytext.length !== 0) return line;     // already decoded?
 
-        var ct = this.header.get_decoded('content-type') || 'text/plain';
-        var enc = 'UTF-8';
-        var matches = /\bcharset\s*=\s*(?:\"|3D|')?([\w_\-]*)(?:\"|3D|')?/.exec(ct);
-        if (matches) {
-            enc = matches[1];
+    var buf = this.decode_function(this.body_text_encoded);
+    var ct  = this.header.get_decoded('content-type') || 'text/plain';
+    var enc = 'UTF-8';
+    var pre_enc = '';
+    var matches = /\bcharset\s*=\s*(?:\"|3D|')?([\w_\-]*)(?:\"|3D|')?/.exec(ct);
+    if (matches) {
+        pre_enc = (matches[1]).trim();
+        if (pre_enc.length > 0) {
+            enc = pre_enc;
         }
-        this.body_encoding = enc;
+    }
+    this.body_encoding = enc;
 
-        if (this.filters.length) {
-            // up until this point we've returned '' for line, so now we run
-            // the filters and return the whole lot as one line, re-encoded using
-            // whatever encoding scheme we had to use to decode it in the first
-            // place.
+    if (this.filters.length) {
+        // up until this point we've returned '' for line, so now we run
+        // the filters and return the whole lot as one line, re-encoded using
+        // whatever encoding scheme we used to decode it.
 
-            var new_buf = buf;
-            this.filters.forEach(function (filter) {
-                new_buf = filter(ct, enc, new_buf) || new_buf;
-            });
+        var new_buf = buf;
+        this.filters.forEach(function (filter) {
+            new_buf = filter(ct, enc, new_buf) || new_buf;
+        });
 
-            // Now convert back to base_64 or QP if required:
-            if (this.decode_function === this.decode_qp) {
-                line = utils.encode_qp(new_buf.toString("binary")) + "\n" + line;
-            }
-            else if (this.decode_function === this.decode_base64) {
-                line = new_buf.toString("base64").replace(/(.{1,76})/g, "$1\n") + line;
-            }
-            else {
-                line = new_buf.toString("binary") + line; // "binary" is deprecated, lets hope this works...
-            }
+        // convert back to base_64 or QP if required:
+        if (this.decode_function === this.decode_qp) {
+            line = utils.encode_qp(new_buf.toString("binary")) + "\n" + line;
         }
-
-        // Now convert the buffer to UTF-8 to store in this.bodytext
-        if (Iconv) {
-            if (/UTF-?8/i.test(enc)) {
-                this.bodytext = buf.toString();
-            }
-            else {
-                try {
-                    var converter = new Iconv(enc, "UTF-8");
-                    this.bodytext = converter.convert(buf).toString();
-                }
-                catch (err) {
-                    logger.logwarn("initial iconv conversion from " + enc + " to UTF-8 failed: " + err.message);
-                    this.body_encoding = 'broken//' + enc;
-                    // EINVAL is returned when the encoding type is not recognised/supported (e.g. ANSI_X3)
-                    if (err.code !== 'EINVAL') {
-                        // Perform the conversion again, but ignore any errors
-                        try { 
-                            var converter = new Iconv(enc, 'UTF-8//TRANSLIT//IGNORE');
-                            this.bodytext = converter.convert(buf).toString();
-                        }
-                        catch (e) {
-                            logger.logerror('iconv conversion from ' + enc + ' to UTF-8 failed: ' + e.message);
-                            this.bodytext = buf.toString();
-                        }
-                    }
-                }
-            }
+        else if (this.decode_function === this.decode_base64) {
+            line = new_buf.toString("base64").replace(/(.{1,76})/g, "$1\n") + line;
         }
         else {
-            this.body_encoding = 'no_iconv';
-            this.bodytext = buf.toString();
+            // "binary" is deprecated, lets hope this works...
+            line = new_buf.toString("binary") + line;
         }
-
-        // delete this.body_text_encoded;
     }
+
+    // convert the buffer to UTF-8, stored in this.bodytext
+    this.try_iconv(buf, enc);
+
+    // delete this.body_text_encoded;
     return line;
-}
+};
+
+Body.prototype.try_iconv = function(buf, enc) {
+
+    if (!Iconv) {
+        this.body_encoding = 'no_iconv';
+        this.bodytext = buf.toString();
+        return;
+    }
+
+    if (/UTF-?8/i.test(enc)) {
+        this.bodytext = buf.toString();
+        return;
+    }
+
+    try {
+        var converter = new Iconv(enc, "UTF-8");
+        this.bodytext = converter.convert(buf).toString();
+    }
+    catch (err) {
+        logger.logwarn("initial iconv conversion from " + enc + " to UTF-8 failed: " + err.message);
+        this.body_encoding = 'broken//' + enc;
+        // EINVAL is returned when the encoding type is not recognised/supported (e.g. ANSI_X3)
+        if (err.code !== 'EINVAL') {
+            // Perform the conversion again, but ignore any errors
+            try {
+                var converter = new Iconv(enc, 'UTF-8//TRANSLIT//IGNORE');
+                this.bodytext = converter.convert(buf).toString();
+            }
+            catch (e) {
+                logger.logerror('iconv conversion from ' + enc + ' to UTF-8 failed: ' + e.message);
+                this.bodytext = buf.toString();
+            }
+        }
+    }
+};
 
 Body.prototype.parse_body = function (line) {
     this.body_text_encoded += line;
-    if (this.filters.length)
-        return '';
+    if (this.filters.length) return '';
     return line;
-}
+};
 
 Body.prototype.parse_multipart_preamble = function (line) {
-    if (this.boundary) {
-        if (line.substr(0, (this.boundary.length + 2)) === ('--' + this.boundary)) {
-            if (line.substr(this.boundary.length + 2, 2) === '--') {
-                // end
-            }
-            else {
-                // next section
-                var bod = new Body(new Header(), this.options);
-                this.listeners('attachment_start').forEach(function (cb) { bod.on('attachment_start', cb) });
-                this.filters.forEach(function (f) { bod.add_filter(f); });
-                this.children.push(bod);
-                bod.state = 'headers';
-                this.state = 'child';
-            }
-            return line;
+    if (!this.boundary) return line;
+
+    if (line.substr(0, (this.boundary.length + 2)) === ('--' + this.boundary)) {
+        if (line.substr(this.boundary.length + 2, 2) === '--') {
+            // end
         }
+        else {
+            // next section
+            var bod = new Body(new Header(), this.options);
+            this.listeners('attachment_start').forEach(function (cb) { bod.on('attachment_start', cb) });
+            this.filters.forEach(function (f) { bod.add_filter(f); });
+            this.children.push(bod);
+            bod.state = 'headers';
+            this.state = 'child';
+        }
+        return line;
     }
+
     return line;
-}
+};
 
 Body.prototype.parse_attachment = function (line) {
     if (this.boundary) {
@@ -372,16 +385,16 @@ Body.prototype.parse_attachment = function (line) {
         this.buf_fill += buf.length;
     }
     return line;
-}
+};
 
 Body.prototype.decode_qp = utils.decode_qp;
 
 Body.prototype.decode_base64 = function (line) {
     return new Buffer(line, "base64");
-}
+};
 
 Body.prototype.decode_8bit = function (line) {
     return new Buffer(line, 'binary');
-}
+};
 
 Body.prototype.decode_7bit = Body.prototype.decode_8bit;
