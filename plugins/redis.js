@@ -119,7 +119,7 @@ exports.get_redis_client = function (opts, next) {
         .on('ready', function () {
             if (db) client.select(db);
 
-            var msg = 'connected to redis://' + opts.host + ':' + opts.port;
+            var msg = 'connected to redis://' + client.address;
             if (db) msg += '/' + db;
             if (client.server_info && client.server_info.redis_version) {
                 msg += ' v' + client.server_info.redis_version;
