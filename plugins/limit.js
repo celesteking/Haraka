@@ -67,7 +67,7 @@ exports.max_unrecognized_commands = function(next, connection, cmd) {
     if (parseFloat(uc.unrec_cmds) <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'unrec_cmds.max'});
-    return next(DENYDISCONNECT, 'Too many unrecognized commands');
+    return next(DENYDISCONNECT, 'Too many unrecognized commands (' + connection.uuid + ')');
 };
 
 exports.max_errors = function (next, connection) {
@@ -80,7 +80,7 @@ exports.max_errors = function (next, connection) {
     if (connection.errors <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'errors.max'});
-    return next(DENYSOFTDISCONNECT, 'Too many errors');
+    return next(DENYSOFTDISCONNECT, 'Too many errors (' + connection.uuid + ')');
 };
 
 exports.max_recipients = function (next, connection, params) {
@@ -95,7 +95,7 @@ exports.max_recipients = function (next, connection, params) {
     if (count <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'recipients.max'});
-    return next(DENYSOFT, 'Too many recipients');
+    return next(DENYSOFT, 'Too many recipients (' + connection.uuid + ')');
 };
 
 exports.get_recipient_limit = function (connection) {
@@ -187,7 +187,7 @@ exports.check_concurrency = function (next, connection) {
 
     // Disconnect slowly.
     setTimeout(function () {
-        return next(DENYSOFTDISCONNECT, 'Too many concurrent connections');
+        return next(DENYSOFTDISCONNECT, 'Too many concurrent connections (' + connection.uuid + ')');
     }, delay * 1000);
 };
 
