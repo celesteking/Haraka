@@ -296,6 +296,7 @@ function connect(port, host, cb) {
         var cleartext = pipe(pair, cryptoSocket);
 
         pair.on('error', function(exception) {
+            exception.source = 'tls';
             socket.emit('error', exception);
         });
 
