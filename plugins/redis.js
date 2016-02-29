@@ -54,6 +54,7 @@ exports.init_redis_connection = function (next, server) {
     var opts = plugin.redisCfg.opts;
     opts.host = plugin.redisCfg.server.host;
     opts.port = plugin.redisCfg.server.port;
+    opts.db   = plugin.redisCfg.server.db;
     server.notes.redis = plugin.get_redis_client(opts, callNext);
 };
 
