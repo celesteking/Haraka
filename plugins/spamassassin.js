@@ -51,8 +51,8 @@ exports.hook_data_post = function (next, connection) {
     var start = Date.now();
 
     socket.on('line', function (line) {
-        connection.logprotocol(plugin, "Spamd C: " + line + ' state=' + state);
         line = line.replace(/\r?\n/, '');
+        connection.logprotocol(plugin, "Spamd C: " + line + ' | state=' + state);
         if (state === 'line0') {
             spamd_response.line0 = line;
             state = 'response';
