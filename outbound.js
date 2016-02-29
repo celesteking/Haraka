@@ -346,6 +346,7 @@ exports.init_redis = function(cb) {
     var self = this;
     if (cfg.redis.disable_for_failed_hosts) { // which means changing this var in-flight won't work
         self.redis = Object.create(plugins.registered_plugins['redis']);
+        self.redis.name = 'redis-outbound'
         self.redis.cfg = { redis: cfg.redis };
         self.redis.init_redis_plugin(cb, plugins.server);
     } else {
