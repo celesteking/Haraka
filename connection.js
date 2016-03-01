@@ -1657,7 +1657,7 @@ Connection.prototype.store_queue_result = function (retval, msg) {
 
 Connection.prototype.queue_outbound_respond = function(retval, msg) {
     var self = this;
-    if (!msg) msg = this.queue_msg(retval, msg);
+    if (!msg) msg = this.queue_msg(retval, msg) || 'Message Queued';
     this.store_queue_result(retval, msg);
     msg = msg + ' (' + this.transaction.uuid + ')';
     if (retval !== constants.ok) {
@@ -1696,16 +1696,14 @@ Connection.prototype.queue_outbound_respond = function(retval, msg) {
             });
             break;
         default:
-            outbound.send_email(this.transaction, function(retval, msg) {
-                if (!msg) msg = self.queue_msg(retval, msg);
+            outbound.send_email(this.transaction, function(retval, msg_outb) {
+                if (!msg_outb) msg_outb = self.queue_msg(retval, msg);
                 switch (retval) {
                     case constants.ok:
-                        if (!msg) msg = self.queue_msg(retval, msg);
-                        plugins.run_hooks('queue_ok', self, msg);
+                        plugins.run_hooks('queue_ok', self, msg_outb);
                         break;
                     case constants.deny:
-                        if (!msg) msg = self.queue_msg(retval, msg);
-                        self.respond(550, msg, function() {
+                        self.respond(550, msg_outb, function() {
                             self.msg_count.reject++;
                             self.transaction.msg_status.rejected = true;
                             self.reset_transaction(function () {
@@ -1714,8 +1712,8 @@ Connection.prototype.queue_outbound_respond = function(retval, msg) {
                         });
                         break;
                     default:
-                        self.logerror("Unrecognised response from outbound layer: " + retval + " : " + msg);
-                        self.respond(550, msg || "Internal Server Error", function() {
+                        self.logerror("Unrecognised response from outbound layer: " + retval + " : " + msg_outb);
+                        self.respond(550, msg_outb || "Internal Server Error", function() {
                             self.msg_count.reject++;
                             self.transaction.msg_status.rejected = true;
                             self.reset_transaction(function () {
@@ -1731,7 +1729,7 @@ Connection.prototype.queue_respond = function(retval, msg) {
     var self = this;
     if (!msg) msg = this.queue_msg(retval, msg);
     this.store_queue_result(retval, msg);
-    msg = msg + ' (' + this.transaction.uuid + ')';
+//    msg = msg + ' (' + this.transaction.uuid + ')';
 
     if (retval !== constants.ok) {
         this.lognotice('queue code=' + constants.translate(retval) + ' msg="' + msg + '"');

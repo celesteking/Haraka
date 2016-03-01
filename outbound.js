@@ -546,7 +546,7 @@ exports.send_trans_email = function (transaction, next) {
         }
 
         if (next) {
-            next(constants.ok, "Message Queued");
+            next(constants.ok);
         }
     });
 };
