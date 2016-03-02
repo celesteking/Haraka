@@ -142,7 +142,8 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
     this.socket.on('connect', function () {
         // Remove connection timeout and set idle timeout
         client.socket.setTimeout(((idle_timeout) ? idle_timeout : 300) * 1000);
-        client.remote_ip = ipaddr.process(client.socket.remoteAddress).toString();
+//        util.error('See: ' + util.inspect(client.socket));
+//        client.remote_ip = ipaddr.process(client.socket.remoteAddress).toString();
     });
 
     var closed = function (msg) {
