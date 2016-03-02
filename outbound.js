@@ -42,12 +42,18 @@ exports.load_config = function () {
         booleans: [
             '-disabled',
             '-always_split',
-            '+enable_tls',
             '-ipv6_enabled',
+            // tls stuff
+            '+enable_tls',
+            '-redis.disable_for_failed_hosts'
         ],
     }, function () {
         exports.load_config();
-    }).main;
+    });
+
+    var redis = cfg.redis;
+    cfg = cfg.main;
+    cfg.redis = redis;
 
     // legacy config file support. Remove in Haraka 4.0
     if (!cfg.disabled && config.get('outbound.disabled')) {
@@ -181,11 +187,14 @@ exports.ensure_queue_dir = function () {
 };
 
 exports.load_queue = function (pid) {
+    var self = this;
     // Initialise and load queue
-    // This function is called first when not running under cluster,
-    // so we create the queue directory if it doesn't already exist.
-    this.ensure_queue_dir();
-    this._load_cur_queue(pid, "_add_file");
+    // This function is called first when not running under cluster.
+    exports.init_redis(function () {
+        // So we create the queue directory if it doesn't already exist.
+        self.ensure_queue_dir();
+        self._load_cur_queue(pid, "_add_file");
+    });
 };
 
 exports._load_cur_queue = function (pid, cb_name, cb) {
@@ -331,6 +340,47 @@ exports.stats = function () {
     };
 
     return results;
+};
+
+exports.init_redis = function(cb) {
+    var self = this;
+    if (cfg.redis.disable_for_failed_hosts) { // which means changing this var in-flight won't work
+        self.redis = Object.create(plugins.registered_plugins['redis']);
+        self.redis.name = 'redis-outbound'
+        self.redis.cfg = { redis: cfg.redis };
+        self.redis.init_redis_plugin(cb, plugins.server);
+    } else {
+        cb();
+    }
+};
+
+// Check for if host is prohibited from TLS negotiation
+exports.check_tls_nogo = function(host, cb_ok, cb_nogo){
+    var self = this;
+    var dbkey = 'no_tls|' + host;
+
+    self.redis.db.get(dbkey, function (err, dbr) {
+        if (err) {
+            self.logerror("Redis returned error: " + err);
+            return cb_ok();
+        }
+
+        return dbr ? cb_nogo() : cb_ok();
+    });
+};
+
+exports.mark_tls_nogo = function(host, cb){
+    var self = this;
+    var dbkey = 'no_tls|' + host;
+    var expiry = cfg.redis.disable_expiry || 604800;
+
+    self.lognotice('TLS connection failed. Marking ' + host + ' as non-TLS for ' + expiry + ' seconds');
+
+    self.redis.db.setex(dbkey, expiry, self.cur_time, function (err, dbr) {
+        if (err) self.logerror('Redis returned error: ' + err);
+
+        cb();
+    });
 };
 
 function _next_uniq () {
@@ -1074,8 +1124,12 @@ HMailItem.prototype.try_deliver_host_on_socket = function (mx, host, port, socke
         if (processing_mail) {
             self.logerror("Ongoing connection failed to " + host + ":" + port + " : " + err);
             processing_mail = false;
+
+            if (err.source == 'tls' && cfg.redis.disable_for_failed_hosts) { // exception thrown from tls_socket during tls upgrade
+                return exports.mark_tls_nogo(host, function(){ return self.try_deliver_host(mx); });
+            }
             // try the next MX
-            self.try_deliver_host(mx);
+            return self.try_deliver_host(mx);
         }
     });
 
@@ -1164,79 +1218,97 @@ HMailItem.prototype.try_deliver_host_on_socket = function (mx, host, port, socke
             }
         }
 
+        var auth_and_mail_phase = function () {
+            // IMPORTANT: we do STARTTLS before we attempt AUTH for extra security
+            if (!authenticated && (mx.auth_user && mx.auth_pass)) {
+                // We have AUTH credentials to send for this domain
+                if (!(Array.isArray(smtp_properties.auth) && smtp_properties.auth.length)) {
+                    // AUTH not offered
+                    self.logwarn('AUTH configured for domain ' + self.todo.domain +
+                                 ' but host ' + host + ' did not advertise AUTH capability');
+                    // Try and send the message without authentication
+                    return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+                }
+
+                if (!mx.auth_type) {
+                    // User hasn't specified an authentication type, so we pick one
+                    // We'll prefer CRAM-MD5 as it's the most secure that we support.
+                    if (smtp_properties.auth.indexOf('CRAM-MD5') !== -1) {
+                        mx.auth_type = 'CRAM-MD5';
+                    }
+                    // PLAIN requires less round-trips compared to LOGIN
+                    else if (smtp_properties.auth.indexOf('PLAIN') !== -1) {
+                        // PLAIN requires less round trips compared to LOGIN
+                        // So we'll make this our 2nd pick.
+                        mx.auth_type = 'PLAIN';
+                    }
+                    else if (smtp_properties.auth.indexOf('LOGIN') !== -1) {
+                        mx.auth_type = 'LOGIN';
+                    }
+                }
+
+                if (!mx.auth_type || (mx.auth_type && smtp_properties.auth.indexOf(mx.auth_type.toUpperCase()) === -1)) {
+                    // No compatible authentication types offered by the server
+                    self.logwarn('AUTH configured for domain ' + self.todo.domain + ' but host ' + host +
+                                 'did not offer any compatible types' +
+                                 ((mx.auth_type) ? ' (requested: ' + mx.auth_type + ')' : '') +
+                                 ' (offered: ' + smtp_properties.auth.join(',') + ')');
+                    // Proceed without authentication
+                    return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+                }
+
+                switch (mx.auth_type.toUpperCase()) {
+                    case 'PLAIN':
+                        return send_command('AUTH', 'PLAIN ' +
+                            utils.base64(mx.auth_user + "\0" + mx.auth_user + "\0" + mx.auth_pass));
+                    case 'LOGIN':
+                        authenticating = true;
+                        return send_command('AUTH', 'LOGIN');
+                    case 'CRAM-MD5':
+                        authenticating = true;
+                        return send_command('AUTH', 'CRAM-MD5');
+                    default:
+                        // Unsupported AUTH type
+                        self.logwarn('Unsupported authentication type ' + mx.auth_type.toUpperCase() +
+                                     ' requested for domain ' + self.todo.domain);
+                        return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+                }
+            }
+
+            return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+        };
+
         // TLS
         if (!(self.todo.domain in tls_config.no_tls_hosts) &&
             !(host in tls_config.no_tls_hosts) &&
             smtp_properties.tls && cfg.enable_tls && !secured)
         {
-            console.log(tls_config.no_tls_hosts);
-            console.log("domain:", self.todo.domain, "host:", host);
-            socket.on('secure', function () {
-                // Set this flag so we don't try STARTTLS again if it
-                // is incorrectly offered at EHLO once we are secured.
-                secured = true;
-                send_command(mx.using_lmtp ? 'LHLO' : 'EHLO', mx.bind_helo);
-            });
-            return send_command('STARTTLS');
-        }
+            console.log("TLS for domain:", self.todo.domain, "host:", host);
 
-        // IMPORTANT: we do STARTTLS before we attempt AUTH for extra security
-        if (!authenticated && (mx.auth_user && mx.auth_pass)) {
-            // We have AUTH credentials to send for this domain
-            if (!(Array.isArray(smtp_properties.auth) && smtp_properties.auth.length)) {
-                // AUTH not offered
-                self.logwarn('AUTH configured for domain ' + self.todo.domain +
-                             ' but host ' + host + ' did not advertise AUTH capability');
-                // Try and send the message without authentication
-                return send_command('MAIL', 'FROM:' + self.todo.mail_from);
-            }
+            var upgrade_tls_socket = function () {
+                socket.on('secure', function () {
+                    // Set this flag so we don't try STARTTLS again if it
+                    // is incorrectly offered at EHLO once we are secured.
+                    secured = true;
+                    send_command(mx.using_lmtp ? 'LHLO' : 'EHLO', mx.bind_helo);
+                });
+                return send_command('STARTTLS');
+            };
 
-            if (!mx.auth_type) {
-                // User hasn't specified an authentication type, so we pick one
-                // We'll prefer CRAM-MD5 as it's the most secure that we support.
-                if (smtp_properties.auth.indexOf('CRAM-MD5') !== -1) {
-                    mx.auth_type = 'CRAM-MD5';
-                }
-                // PLAIN requires less round-trips compared to LOGIN
-                else if (smtp_properties.auth.indexOf('PLAIN') !== -1) {
-                    // PLAIN requires less round trips compared to LOGIN
-                    // So we'll make this our 2nd pick.
-                    mx.auth_type = 'PLAIN';
-                }
-                else if (smtp_properties.auth.indexOf('LOGIN') !== -1) {
-                    mx.auth_type = 'LOGIN';
-                }
-            }
-
-            if (!mx.auth_type || (mx.auth_type && smtp_properties.auth.indexOf(mx.auth_type.toUpperCase()) === -1)) {
-                // No compatible authentication types offered by the server
-                self.logwarn('AUTH configured for domain ' + self.todo.domain + ' but host ' + host +
-                             'did not offer any compatible types' +
-                             ((mx.auth_type) ? ' (requested: ' + mx.auth_type + ')' : '') +
-                             ' (offered: ' + smtp_properties.auth.join(',') + ')');
-                // Proceed without authentication
-                return send_command('MAIL', 'FROM:' + self.todo.mail_from);
-            }
-
-            switch (mx.auth_type.toUpperCase()) {
-                case 'PLAIN':
-                    return send_command('AUTH', 'PLAIN ' +
-                        utils.base64(mx.auth_user + "\0" + mx.auth_user + "\0" + mx.auth_pass));
-                case 'LOGIN':
-                    authenticating = true;
-                    return send_command('AUTH', 'LOGIN');
-                case 'CRAM-MD5':
-                    authenticating = true;
-                    return send_command('AUTH', 'CRAM-MD5');
-                default:
-                    // Unsupported AUTH type
-                    self.logwarn('Unsupported authentication type ' + mx.auth_type.toUpperCase() +
-                                 ' requested for domain ' + self.todo.domain);
-                    return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+            if (cfg.redis.disable_for_failed_hosts) {
+                return exports.check_tls_nogo(host,
+                        upgrade_tls_socket, // Clear to GO
+                        function () {       // No GO
+                            self.loginfo('TLS disabled for ' + host + ' because it was previously marked as non-TLS');
+                            return auth_and_mail_phase();
+                        }
+                );
+            } else {
+                return upgrade_tls_socket();
             }
         }
 
-        return send_command('MAIL', 'FROM:' + self.todo.mail_from);
+        return auth_and_mail_phase();
     };
 
     var finish_processing_mail = function (success) {
