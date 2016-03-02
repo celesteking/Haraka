@@ -76,8 +76,8 @@ exports.log_transaction = function (next, connection) {
     var plugin = this;
     var trans = connection.transaction;
 
-    if (plugin.cfg.ignore_hosts && (plugin.cfg.ignore_hosts[connection.remote_host] || plugin.cfg.ignore_hosts[connection.remote_ip])) {
-        return next(CONT, 'not logging ignored host');
+    if (plugin.cfg.ignore_hosts) {
+        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
     }
 
     var res = { plugins: plugin.get_plugin_results(connection) };
@@ -161,8 +161,8 @@ exports.log_transaction = function (next, connection) {
 exports.log_connection = function (next, connection) {
     var plugin = this;
 
-    if (plugin.cfg.ignore_hosts && (plugin.cfg.ignore_hosts[connection.remote_host] || plugin.cfg.ignore_hosts[connection.remote_ip])) {
-        return next(CONT, 'not logging ignored host');
+    if (plugin.cfg.ignore_hosts) {
+        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
     }
 
     if (connection.notes.elasticsearch &&
@@ -191,7 +191,7 @@ exports.log_connection = function (next, connection) {
 exports.log_delivered = function(next, hmail, status) {
     var plugin = this;
 
-    plugin.lognotice("DELIVERED: ip=" + status[1] + ' rcpts=' + status[6].map(function(e){ return e.address() }));
+    plugin.logdebug("DELIVERED: ip=" + status[1] + ' rcpts=' + status[6].map(function(e){ return e.address() }));
     if (!hmail.todo.notes.th_table)
         plugin.logwarn("DELIVERED: It looks like a LOCAL bounce");
 //    plugin.lognotice("HMAIL: " + util.inspect(hmail, {depth: 6}));
@@ -251,7 +251,7 @@ exports.log_deferred = function(next, hmail, opts){
     var error_message = opts.err;
     var error = opts.extra;
 
-    plugin.lognotice("Deferred: " + error_message + ', extra: ' + util.inspect(error));
+    plugin.logdebug("Deferred: " + error_message + ', extra: ' + util.inspect(error));
 //    plugin.lognotice("Deferred hmail rcpt: " + util.inspect(hmail.todo.rcpt_to.map(function(e){ return e.original })));
 
     if (!hmail.todo.notes.th_table)
@@ -296,7 +296,7 @@ exports.log_deferred = function(next, hmail, opts){
 exports.log_bounced = function(next, hmail, error){
     var plugin = this;
 
-    plugin.lognotice("Bounced: " + util.inspect(error));
+    plugin.logdebug("Bounced: " + util.inspect(error));
 
     var bounced_addrs = error.bounced_rcpt || hmail.todo.rcpt_to;
 
@@ -379,7 +379,7 @@ exports.update_es_txn_document = function(opts){
 exports.update_es_document = function(opts){
     var plugin = this;
 
-    plugin.lognotice("updating idx=" + opts.index + ' id=' + opts.id + ' doc=' + util.inspect(opts.document, {depth: 5}).replace(/\n/g, ' '));
+    plugin.logdebug("updating idx=" + opts.index + ' id=' + opts.id + ' doc=' + util.inspect(opts.document, {depth: 5}).replace(/\n/g, ' '));
 
     plugin.es.update({
         index: opts.index,

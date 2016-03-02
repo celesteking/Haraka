@@ -21,7 +21,7 @@ exports.register = function () {
     });
 
     if (plugin.cfg.concurrency) {
-        plugin.register_hook('lookup_rdns',  'incr_concurrency');
+        plugin.register_hook('connect_init', 'incr_concurrency');
         plugin.register_hook('connect',      'check_concurrency');
         plugin.register_hook('disconnect',   'decr_concurrency');
     }
@@ -67,7 +67,7 @@ exports.max_unrecognized_commands = function(next, connection, cmd) {
     if (parseFloat(uc.unrec_cmds) <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'unrec_cmds.max'});
-    return next(DENYDISCONNECT, 'Too many unrecognized commands');
+    return next(DENYDISCONNECT, 'Too many unrecognized commands (' + connection.uuid + ')');
 };
 
 exports.max_errors = function (next, connection) {
@@ -80,7 +80,7 @@ exports.max_errors = function (next, connection) {
     if (connection.errors <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'errors.max'});
-    return next(DENYSOFTDISCONNECT, 'Too many errors');
+    return next(DENYSOFTDISCONNECT, 'Too many errors (' + connection.uuid + ')');
 };
 
 exports.max_recipients = function (next, connection, params) {
@@ -95,7 +95,7 @@ exports.max_recipients = function (next, connection, params) {
     if (count <= max) { return next(); }
 
     connection.results.add(plugin, {fail: 'recipients.max'});
-    return next(DENYSOFT, 'Too many recipients');
+    return next(DENYSOFT, 'Too many recipients (' + connection.uuid + ')');
 };
 
 exports.get_recipient_limit = function (connection) {
@@ -129,7 +129,7 @@ exports.get_recipient_limit = function (connection) {
 
     if (history > 0) return plugin.cfg.recipients.history_good || 50;
     if (history < 0) return plugin.cfg.recipients.history_bad  || 2;
-                     return plugin.cfg.recipients.history_none || 15;
+    return plugin.cfg.recipients.history_none || 15;
 };
 
 exports.incr_concurrency = function (next, connection) {
@@ -172,23 +172,22 @@ exports.check_concurrency = function (next, connection) {
     var concurrent = parseInt(connection.notes.limit);
 
     if (concurrent <= max) {
-        connection.logdebug(plugin, 'concurrent ' + concurrent +
-            ' <= ' + max);
+        connection.results.add(plugin, { pass: concurrent + '/' + max});
         return next();
     }
-    connection.logdebug(plugin, 'concurrent ' + concurrent +
-            ' exceeds max ' + max);
+
+    connection.results.add(plugin, {
+        fail: 'concurrency: ' + concurrent + '/' + max,
+    });
 
     var delay = 3;
     if (plugin.cfg.concurrency.disconnect_delay) {
         delay = parseFloat(plugin.cfg.concurrency.disconnect_delay);
     }
 
-    connection.results.add(plugin, {fail: 'concurrency.max'});
-
     // Disconnect slowly.
     setTimeout(function () {
-        return next(DENYSOFTDISCONNECT, 'Too many concurrent connections');
+        return next(DENYSOFTDISCONNECT, 'Too many concurrent connections (' + connection.uuid + ')');
     }, delay * 1000);
 };
 
@@ -205,12 +204,12 @@ exports.get_concurrency_limit = function (connection) {
         connection.logerror(plugin, 'no ' + history_plugin + ' results,' +
                ' disabling history due to misconfiguration');
         delete plugin.cfg.concurrency.history;
-        return;
+        return plugin.cfg.concurrency.max;
     }
 
     if (results.history === undefined) {
-        connection.logerror(plugin, 'no history from : ' + history_plugin);
-        return;
+        connection.loginfo(plugin, 'no IP history from : ' + history_plugin);
+        return plugin.cfg.concurrency.max;
     }
 
     var history = parseFloat(results.history);
@@ -219,7 +218,7 @@ exports.get_concurrency_limit = function (connection) {
 
     if (history < 0) { return plugin.cfg.concurrency.history_bad  || 1; }
     if (history > 0) { return plugin.cfg.concurrency.history_good || 5; }
-                       return plugin.cfg.concurrency.history_none || 3;
+    return plugin.cfg.concurrency.history_none || 3;
 };
 
 exports.decr_concurrency = function (next, connection) {

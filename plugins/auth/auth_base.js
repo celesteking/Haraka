@@ -28,7 +28,7 @@ exports.get_plain_passwd = function (user, cb) {
 
 exports.hook_unrecognized_command = function (next, connection, params) {
     var plugin = this;
-    if(params[0].toUpperCase() === AUTH_COMMAND && params[1]) {
+    if (params[0].toUpperCase() === AUTH_COMMAND && params[1]) {
         return plugin.select_auth_method(next, connection,
                 params.slice(1).join(' '));
     }
@@ -61,8 +61,8 @@ exports.check_cram_md5_passwd = function (connection, user, passwd, cb) {
             return cb(false);
         }
 
-        var hmac = crypto.createHmac('md5', plain_pw);
-            hmac.update(connection.notes.auth_ticket);
+        var hmac = crypto.createHmac('md5', plain_pw.toString());
+        hmac.update(connection.notes.auth_ticket);
 
         if (hmac.digest('hex') === passwd) {
             return cb(true);
@@ -92,8 +92,15 @@ exports.check_user = function (next, connection, credentials, method) {
 
         if (valid) {
             connection.relaying = true;
-            connection.results.add({name:'relay'}, {pass: 'auth'});
+            connection.results.add({name:'relay'}, {pass: plugin.name});
             connection.results.add(plugin, {pass: method});
+
+            connection.results.add({name:'auth'}, {
+                pass: plugin.name,
+                method: method,
+                user: credentials[0]
+            });
+
             connection.respond(status_code, status_message, function () {
                 connection.authheader = "(authenticated bits=0)\n";
                 connection.auth_results('auth=pass (' +
@@ -108,7 +115,9 @@ exports.check_user = function (next, connection, credentials, method) {
             connection.notes.auth_fails = 0;
         }
         connection.notes.auth_fails++;
-        connection.results.add(plugin, {fail: method});
+        connection.results.add({name: 'auth'}, {
+            fail: plugin.name + '/' + method,
+        });
 
         connection.notes.auth_login_userlogin = null;
         connection.notes.auth_login_asked_login = false;
@@ -182,8 +191,9 @@ exports.auth_login = function(next, connection, params) {
         ( connection.notes.auth_login_asked_login &&
          !connection.notes.auth_login_userlogin))
     {
-        if (!params[0])
+        if (!params[0]){
             return next(DENYDISCONNECT, 'bad protocol');
+        }
 
         var login = utils.unbase64(params[0]);
         connection.respond(334, LOGIN_STRING2, function () {
@@ -196,9 +206,9 @@ exports.auth_login = function(next, connection, params) {
 
     if (connection.notes.auth_login_userlogin) {
         var credentials = [
-		        connection.notes.auth_login_userlogin,
-		        utils.unbase64(params[0])
-	        ];
+            connection.notes.auth_login_userlogin,
+            utils.unbase64(params[0])
+        ];
         return plugin.check_user(next, connection, credentials,
                 AUTH_METHOD_LOGIN);
     }

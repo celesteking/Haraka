@@ -1,25 +1,30 @@
 // Greylisting Haraka plugin
 
-var version = '0.1.2';
+var version = '0.1.3';
 
 var util = require('util');
 var redis = require('redis');
-var Q = require('q');
-var DSN = require('Haraka/dsn');
-var net_utils = require('Haraka/net_utils');
-var utils = require('Haraka/utils');
-var Address   = require('Haraka/address').Address;
+var async = require('async');
+var isIPv6 = require('net').isIPv6;
+
 var ipaddr = require('ipaddr.js');
 
+var DSN = require('./dsn');
+var net_utils = require('./net_utils');
+var utils = require('./utils');
+var Address = require('./address').Address;
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-exports.register = function(next){
+exports.register = function (next) {
     var plugin = this;
 
     plugin.load_config();
     plugin.load_config_lists();
 
-    this.register_hook('init_master',  'redis_onInit');
-    this.register_hook('init_child',   'redis_onInit');
+    this.register_hook('init_master', 'redis_onInit');
+    this.register_hook('init_child', 'redis_onInit');
+
+    this.register_hook('rcpt_ok', 'hook_rcpt_ok');
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -27,30 +32,28 @@ exports.load_config = function () {
     var plugin = this;
 
     plugin.cfg = plugin.config.get('greylist.ini', {
-        booleans: [
+        booleans : [
             '+skip.dnswlorg',
             '-skip.mailspikewl'
         ]
-    }, function(){ plugin.load_config(); });
+    }, function () {
+        plugin.load_config();
+    });
 
-    if (plugin.cfg.main.action.match(/learn/i))
-        plugin.lognotice('Plugin running in LEARN mode. Nothing will be deferred or rejected.');
+    plugin.load_config_lists();
 };
 
 // Load various configuration lists
-exports.load_config_lists = function() {
+exports.load_config_lists = function () {
     var plugin = this;
 
     plugin.whitelist = {};
     plugin.list = {};
 
-    function load_list (type, file_name) {
+    function load_list(type, file_name) {
         plugin.whitelist[type] = {};
 
-        // load config with a self-referential callback
-        var list = plugin.config.get(file_name, 'list', function () {
-            load_list(type, file_name);
-        });
+        var list = Object.keys(plugin.cfg[file_name]);
 
         // toLower when loading spends a fraction of a second at load time
         // to save millions of seconds during run time.
@@ -60,31 +63,19 @@ exports.load_config_lists = function() {
         plugin.logdebug('whitelist {' + type + '} loaded from ' + file_name + ' with ' + list.length + ' entries');
     }
 
-    function load_re (type, file_name) {
-        // load config with a self-referential callback
-        var list = plugin.config.get(file_name, 'list', function () {
-            load_re(type, file_name);
-        });
-
-        var regex_list = utils.valid_regexes(list, file_name);
-
-        plugin.whitelist[type] = new RegExp('^(' + regex_list.join('|') + ')$', 'i');
-    }
-
-    function load_ip_list (type, file_name) {
+    function load_ip_list(type, file_name) {
         plugin.whitelist[type] = [];
 
-        var list = plugin.config.get(file_name, 'list', function () {
-            load_ip_list(type, file_name);
-        });
+        var list = Object.keys(plugin.cfg[file_name]);
 
         for (var i = 0; i < list.length; i++) {
             try {
                 var addr = list[i];
                 if (addr.match(/\/\d+$/)) {
                     addr = ipaddr.parseCIDR(addr);
-                } else {
-                    addr = [ipaddr.parse(addr), 32];
+                }
+                else {
+                    addr = ipaddr.parseCIDR(addr + ((isIPv6(addr)) ? '/128' : '/32'));
                 }
 
                 plugin.whitelist[type].push(addr);
@@ -94,79 +85,89 @@ exports.load_config_lists = function() {
         plugin.logdebug('whitelist {' + type + '} loaded from ' + file_name + ' with ' + plugin.whitelist[type].length + ' entries');
     }
 
-    function load_config_list (type, file_name) {
-        plugin.list[type] = plugin.config.get(file_name, 'list', function () {
-            load_config_list(type, file_name);
-        });
+    function load_config_list(type, file_name) {
+        plugin.list[type] = Object.keys(plugin.cfg[file_name]);
 
         plugin.logdebug('list {' + type + '} loaded from ' + file_name + ' with ' + plugin.list[type].length + ' entries');
     }
 
-    load_list('mail', 'greylist.envelope.whitelist');
-    load_list('rcpt', 'greylist.recipient.whitelist');
-    load_ip_list('ip', 'greylist.ip.whitelist');
+    load_list('mail', 'envelope_whitelist');
+    load_list('rcpt', 'recipient_whitelist');
+    load_ip_list('ip', 'ip_whitelist');
 
-    load_config_list('dyndom', 'greylist.special.dynamic.domains');
+    load_config_list('dyndom', 'special_dynamic_domains');
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 exports.redis_onInit = function (next, server) {
     var plugin = this;
 
-    if (plugin.redis) return next();
+    if (plugin.redis)
+        return next();
 
     var r_opts = {
-    	//connect_timeout: 1000
+        //connect_timeout: 1000
     };
 
     var next_called;
 
-    (plugin.redis = redis.createClient(plugin.cfg.redis.port, plugin.cfg.redis.host, r_opts))
-        .on('error', function (err) {
-            plugin.logerror("[gl] Redis error: " + err + '. Reconnecting...');
-        })
-        .on('ready', function(){
-            plugin.loginfo('[gl] Redis connected to ' + plugin.redis.host + ':' + (plugin.redis.port ||0 ) +
-                    '/' +  (plugin.cfg.redis.db || 0 ) + ' v' + plugin.redis.server_info.redis_version);
+    plugin.redis = redis.createClient(plugin.cfg.redis.port, plugin.cfg.redis.host);
 
-            if (plugin.cfg.redis.db) {
-                plugin.redis.select(plugin.cfg.redis.db, function(){
-                    if (!next_called) {
-                        next_called = true;
-                        return next();
-                    }
-                })
-            } else if (!next_called) {
-                next_called = true;
-                return next();
-            }
-        });
+    plugin.redis.on('error', function (err) {
+        plugin.logerror(err);
+        plugin.logerror("[gl] Redis error: " + err + '. Reconnecting...');
+    })
+    .on('ready', function () {
+        plugin.loginfo('[gl] Redis connected to ' + plugin.redis.host + ':' + (plugin.redis.port || 0) +
+            '/' + (plugin.cfg.redis.db || 0) + ' v' + plugin.redis.server_info.redis_version);
+
+        if (plugin.cfg.redis.db) {
+            plugin.redis.select(plugin.cfg.redis.db, function () {
+                if (!next_called) {
+                    next_called = true;
+                    return next();
+                }
+            });
+        }
+        else if (!next_called) {
+            next_called = true;
+            return next();
+        }
+    });
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // We check for IP and envelope whitelist
-exports.hook_mail = function(next, connection, params) {
+exports.hook_mail = function (next, connection, params) {
     var plugin = this;
     var mail_from = params[0];
 
     // whitelist checks
-    if (plugin.ip_in_list(connection.remote_ip)){ // check connecting IP
+    if (plugin.ip_in_list(connection.remote_ip)) { // check connecting IP
 
         plugin.loginfo(connection, 'Connecting IP was whitelisted via config');
-        connection.transaction.results.add(plugin, {skip: 'config-whitelist(ip)'});
+        connection.transaction.results.add(plugin, {
+            skip : 'config-whitelist(ip)'
+        });
 
-    } else if (plugin.addr_in_list('mail', mail_from.address().toLowerCase())){  // check envelope (email & domain)
+    }
+    else if (plugin.addr_in_list('mail', mail_from.address().toLowerCase())) { // check envelope (email & domain)
 
         plugin.loginfo(connection, 'Envelope was whitelisted via config');
-        connection.transaction.results.add(plugin, {skip: 'config-whitelist(envelope)'});
+        connection.transaction.results.add(plugin, {
+            skip : 'config-whitelist(envelope)'
+        });
 
-    } else {
+    }
+    else {
         var why_skip = plugin.process_skip_rules(connection);
 
         if (why_skip) {
             plugin.loginfo(connection, 'Requested to skip the GL because skip rule matched: ' + why_skip);
-            connection.transaction.results.add(plugin, {skip: 'requested(' + why_skip + ')'});
+            connection.transaction.results.add(plugin, {
+                skip : 'requested(' + why_skip + ')'
+            });
         }
     }
 
@@ -182,158 +183,143 @@ exports.hook_rcpt_ok = function (next, connection, rcpt) {
     if (plugin.should_skip_check(connection))
         return next();
 
-    if (ctr.has(plugin, 'skip', 'special-sender')){ // asked to postpone till DATA
-        plugin.loginfo(connection, 'skipping special sender (session)');
-        return next();
-    }
-
     if (plugin.was_whitelisted_in_session(connection)) {
         plugin.logdebug(connection, 'host already whitelisted in this session');
         return next();
     }
 
-    if (plugin.addr_in_list('rcpt', rcpt.address().toLowerCase())) {  // check rcpt in whitelist (email & domain)
+    if (plugin.addr_in_list('rcpt', rcpt.address().toLowerCase())) { // check rcpt in whitelist (email & domain)
         plugin.loginfo(connection, 'RCPT was whitelisted via config');
-        ctr.add(plugin, {skip: 'config-whitelist(recipient)'});
+        ctr.add(plugin, {
+            skip : 'config-whitelist(recipient)'
+        });
         return next();
     }
 
-    return plugin.check_and_update_white(connection)
-            .then(function(white_rec) {
-                if (white_rec) {
-                    plugin.logdebug(connection, 'host in WHITE zone');
-                    ctr.add(plugin, { pass: 'whitelisted' });
-                    ctr.push(plugin, {stats: { rcpt: white_rec }, stage: 'rcpt'});
+    plugin.check_and_update_white(connection, function (err, white_rec) {
+        if (err) {
+            plugin.logerror(connection, 'Got error: ' + util.inspect(err));
+            return next(DENYSOFT, DSN.sec_unspecified('Backend failure. Please, retry later or contact our support.'));
+        }
+        if (white_rec) {
+            plugin.logdebug(connection, 'host in WHITE zone');
+            ctr.add(plugin, {
+                pass : 'whitelisted'
+            });
+            ctr.push(plugin, {
+                stats : {
+                    rcpt : white_rec
+                },
+                stage : 'rcpt'
+            });
 
-                    return next();
-                } else {
-                    if (plugin.is_sender_special(mail_from)) { // postpone till DATA
-                        ctr.add(plugin, {skip: 'special-sender', stage: 'rcpt' });
-                        return next();
+            return next();
+        }
+        else {
+
+            return plugin.process_tuple(connection, mail_from.address(), rcpt.address(), function (err, white_promo_rec) {
+                if (err) {
+                    if (err instanceof Error && err.notanerror) {
+                        plugin.logdebug(connection, 'host in GREY zone');
+
+                        ctr.add(plugin, {
+                            fail : 'greylisted'
+                        });
+                        ctr.push(plugin, {
+                            stats : {
+                                rcpt : err.record
+                            },
+                            stage : 'rcpt'
+                        });
+
+                        return plugin.invoke_outcome_cb(next, false);
                     }
 
-                    return plugin.process_tuple(connection, mail_from.address(), rcpt.address())
-                            .then(function(white_promo_rec) {
-                                plugin.loginfo(connection, 'host has been promoted to WHITE zone');
-
-                                ctr.add(plugin, {pass: 'whitelisted' });
-                                ctr.push(plugin, {stats: { rcpt: white_promo_rec}, stage: 'rcpt', event: 'promoted'});
-
-                                return plugin.invoke_outcome_cb(next, true);
-                            })
-                            .fail(function(error){
-                                if (error instanceof Error && error.notanerror) {
-                                    plugin.logdebug(connection, 'host in GREY zone');
-
-                                    ctr.add(plugin, {fail: 'greylisted'});
-                                    ctr.push(plugin, {stats: { rcpt: error.record}, stage: 'rcpt'});
-
-                                    return plugin.invoke_outcome_cb(next, false);
-                                }
-
-                                throw error;
-                            })
-                            .done();
+                    throw err;
                 }
-            })
-            .fail(function(error){
-                plugin.logerror(connection, 'Got error: ' + util.inspect(error));
-                return next(DENYSOFT, DSN.sec_unspecified('Backend failure. Please, retry later or contact our support.'));
-            })
-            .done();
-};
 
-//
-// Note: We process data hook only when asked by rcpt: results({skip: 'special-sender'})
-//
-exports.hook_data = function(next, connection){
-    var plugin      = this;
-    var ctr         = connection.transaction.results;
-    var from_addr   = connection.transaction.mail_from.address();
-
-    if (!connection.transaction.results.has(plugin, 'skip', 'special-sender'))
-        return next();
-
-    if (plugin.should_skip_check(connection))
-        return next();
-
-    plugin.logdebug(connection, 'Special sender handling requested. Proceeding...');
-
-    // iterate over supplied rcpts, stopping if match is found
-    return Q.any(connection.transaction.rcpt_to.map(function(rcpt){ return plugin.process_tuple(connection, from_addr, rcpt.address())}))
-        .then(function (white_promo_rec) {
-            plugin.loginfo(connection, 'host has been promoted to WHITE zone');
-            ctr.add(plugin, {pass: 'whitelisted', stats: white_promo_rec, stage: 'data'});
-            return plugin.invoke_outcome_cb(next, true);
-        })
-        .fail(function (error) {
-            ctr.add(plugin, {fail: 'greylisted', stage: 'data' });
-            return plugin.invoke_outcome_cb(next, false);
-        })
-        .done();
+                if (!white_promo_rec) {
+                    ctr.add(plugin, {
+                        fail : 'greylisted',
+                        stage : 'rcpt'
+                    });
+                    return plugin.invoke_outcome_cb(next, false);
+                }
+                else {
+                    plugin.loginfo(connection, 'host has been promoted to WHITE zone');
+                    ctr.add(plugin, {
+                        pass : 'whitelisted',
+                        stats : white_promo_rec,
+                        stage : 'rcpt'
+                    });
+                    ctr.add(plugin, {
+                        pass : 'whitelisted'
+                    });
+                    return plugin.invoke_outcome_cb(next, true);
+                }
+            });
+        }
+    });
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // Main GL engine that accepts tuple and returns matched record or a rejection.
-exports.process_tuple = function (connection, sender, rcpt) {
+exports.process_tuple = function (connection, sender, rcpt, cb) {
     var plugin = this;
 
     var key = plugin.craft_grey_key(connection, sender, rcpt);
 
-    return plugin.db_lookup(key)
-            .then(function (record) {
-                plugin.logdebug(connection, 'got record: ' + util.inspect(record));
+    return plugin.db_lookup(key, function (err, record) {
+        if (err) {
+            if (err instanceof Error && err.what == 'db_error')
+                plugin.logwarn(connection, "got err from DB: " + util.inspect(err));
+            throw err;
+        }
+        plugin.logdebug(connection, 'got record: ' + util.inspect(record));
 
-                // { created: TS, updated: TS, lifetime: TTL, tried: Integer }
-                var now = Date.now() / 1000;
+        // { created: TS, updated: TS, lifetime: TTL, tried: Integer }
+        var now = Date.now() / 1000;
 
-                if (record &&
-                        (record.created + plugin.cfg.period.black < now) &&
-                        (record.created + record.lifetime >= now)) {
-                    // Host passed greylisting
-                    return plugin.promote_to_white(connection, record);
-                }
+        if (record &&
+            (record.created + plugin.cfg.period.black < now) &&
+            (record.created + record.lifetime >= now)) {
+            // Host passed greylisting
+            return plugin.promote_to_white(connection, record, cb);
+        }
 
-                return plugin.update_grey(key, !record)
-                        .then(function (created_record) {
-                            var err = new Error('in black zone');
-                            err.record = created_record || record;
-                            err.notanerror = true;
-                            throw err;
-                        });
-            })
-            .fail(function (error) {
-                if (error instanceof Error && error.what == 'db_error')
-                    plugin.logwarn(connection, "got err from DB: " + util.inspect(error));
-                throw error;
-            });
+        return plugin.update_grey(key, !record, function (err, created_record) {
+            var err = new Error('in black zone');
+            err.record = created_record || record;
+            err.notanerror = true;
+            return cb(err, null);
+        });
+    });
 };
 
 // Checks if host is _white_. Updates stats if so.
-exports.check_and_update_white = function (connection) {
+exports.check_and_update_white = function (connection, cb) {
     var plugin = this;
     var ctr = connection.transaction.results;
 
     var key = plugin.craft_white_key(connection);
 
-    return plugin.db_lookup(key)
-            .then(function (record) {
-                if (record) {
-                    if (record.updated + record.lifetime - 2 < Date.now() / 1000) { // race "prevention".
-                        plugin.logerror(connection, "Mischief! Race condition triggered.");
-                        throw new Error('drunkard');
-                    }
+    return plugin.db_lookup(key, function (err, record) {
+        if (err) {
+            plugin.logwarn(connection, "got err from DB: " + util.inspect(err));
+            throw err;
+        }
+        if (record) {
+            if (record.updated + record.lifetime - 2 < Date.now() / 1000) { // race "prevention".
+                plugin.logerror(connection, "Mischief! Race condition triggered.");
+                return cb(new Error('drunkard'));
+            }
 
-                    return plugin.update_white_record(key, record);
-                }
+            return plugin.update_white_record(key, record, cb);
+        }
 
-                return false;
-            })
-            .fail(function (error) {
-                plugin.logwarn(connection, "got err from DB: " + util.inspect(error));
-                throw error;
-            });
+        return cb(null, false);
+    });
 };
 
 // invokes next() depending on outcome param
@@ -342,33 +328,32 @@ exports.invoke_outcome_cb = function (next, is_whitelisted) {
 
     if (is_whitelisted) {
         return next();
-    } else {
-        var action = plugin.cfg.main.action || 'defer';
+    }
+    else {
         var text = plugin.cfg.main.text || '';
 
-        if (action == 'learn') {
-            return next();
-        } else {
-            var reject = (action == 'reject');
-            return next(reject ? DENY : DENYSOFT, DSN.sec_unauthorized(text, reject ? '551' : '451'));
-        }
+        return next(DENYSOFT, DSN.sec_unauthorized(text, '451'));
     }
 };
 
 // Should we skip greylisting invokation altogether?
-exports.should_skip_check = function(connection) {
+exports.should_skip_check = function (connection) {
     var plugin = this;
     var ctr = connection.transaction && connection.transaction.results;
 
     if (connection.relaying) {
         plugin.logdebug(connection, 'skipping GL for relaying host');
-        ctr.add(plugin, {skip: 'relaying'});
+        ctr.add(plugin, {
+            skip : 'relaying'
+        });
         return true;
     }
 
     if (net_utils.is_private_ip(connection.remote_ip)) {
         connection.logdebug(plugin, 'skipping private IP: ' + connection.remote_ip);
-        ctr.add(plugin, {skip: 'private-ip'});
+        ctr.add(plugin, {
+            skip : 'private-ip'
+        });
         return true;
     }
 
@@ -386,13 +371,8 @@ exports.should_skip_check = function(connection) {
     return false;
 };
 
-// Is this a "special" sender?
-exports.is_sender_special = function(addr) {
-    return (!addr.user || addr.user.match(/^(|postmaster|double-bounce(\-?\d{8,12})?)$/));
-};
-
 // Was whitelisted previously in this session
-exports.was_whitelisted_in_session = function(connection) {
+exports.was_whitelisted_in_session = function (connection) {
     return connection.transaction.results.has(this, 'pass', 'whitelisted');
 };
 
@@ -419,9 +399,8 @@ exports.process_skip_rules = function (connection) {
 // Build greylist DB key (originally, a "tuple") off supplied params.
 // When _to_ is false, we craft +sender+ key
 // When _to_ is String, we craft +rcpt+ key
-exports.craft_grey_key = function(connection, from, to){
+exports.craft_grey_key = function (connection, from, to) {
     var plugin = this;
-
     var key = 'grey:' + plugin.craft_hostid(connection) + ':' + (from || '<>');
     if (to != undefined) {
         key += ':' + (to || '<>');
@@ -430,9 +409,8 @@ exports.craft_grey_key = function(connection, from, to){
 };
 
 // Build white DB key off supplied params.
-exports.craft_white_key = function(connection){
+exports.craft_white_key = function (connection) {
     var plugin = this;
-
     return 'white:' + plugin.craft_hostid(connection);
 };
 
@@ -441,15 +419,21 @@ exports.craft_hostid = function (connection) {
     var plugin = this;
     var trx = connection.transaction;
 
-    if (trx.notes.greylist && trx.notes.greylist.hostid) return trx.notes.greylist.hostid; // "caching"
+    if (trx.notes.greylist && trx.notes.greylist.hostid)
+        return trx.notes.greylist.hostid; // "caching"
 
     var ip = connection.remote_ip;
     var rdns = connection.remote_host;
 
-    var chsit = function(value, reason){  // cache the return value
-        if (!value) plugin.logdebug(connection, 'hostid set to IP: ' + reason);
+    var chsit = function (value, reason) { // cache the return value
+        if (!value)
+            plugin.logdebug(connection, 'hostid set to IP: ' + reason);
 
-        trx.results.add(plugin, {hostid_type: value ? 'domain' : 'ip', rdns: (value || ip), msg: reason}); // !don't move me.
+        trx.results.add(plugin, {
+            hostid_type : value ? 'domain' : 'ip',
+            rdns : (value || ip),
+            msg : reason
+        }); // !don't move me.
 
         value = value || ip;
 
@@ -510,25 +494,27 @@ exports.craft_hostid = function (connection) {
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // Retrieve _grey_ record
-exports.retrieve_grey = function (rcpt_key, sender_key) {
+// not implemented
+exports.retrieve_grey = function (rcpt_key, sender_key, cb) {
     var plugin = this;
     var multi = plugin.redis.multi();
 
     multi.hgetall(rcpt_key);
     multi.hgetall(sender_key);
 
-    return Q.ninvoke(multi, 'exec')
-            .fail(function (err) {
-                plugin.lognotice("DB error: " + util.inspect(err));
-                err.what = 'db_error';
-                throw err;
-            });
+    return multi.exec(function (err, result) {
+        if (err) {
+            plugin.lognotice("DB error: " + util.inspect(err));
+            err.what = 'db_error';
+            throw err;
+        }
+        return cb(err, result);
+    });
 };
 
 // Update or create _grey_ record
-exports.update_grey = function (key, create) {
+exports.update_grey = function (key, create, cb) {
     // { created: TS, updated: TS, lifetime: TTL, tried: Integer }
-
     var plugin = this;
     var multi = plugin.redis.multi();
 
@@ -536,28 +522,35 @@ exports.update_grey = function (key, create) {
 
     if (create) {
         var lifetime = plugin.cfg.period.grey;
-        var new_record = {created: ts_now, updated: ts_now, lifetime: lifetime, tried: 1};
+        var new_record = {
+            created : ts_now,
+            updated : ts_now,
+            lifetime : lifetime,
+            tried : 1
+        };
 
         multi.hmset(key, new_record);
         multi.expire(key, lifetime);
-    } else {
+    }
+    else {
         multi.hincrby(key, 'tried', 1);
-        multi.hmset(key, {updated: ts_now});
+        multi.hmset(key, {
+            updated : ts_now
+        });
     }
 
-    return Q.ninvoke(multi, 'exec')
-            .then(function(records){
-                return create ? new_record : false;
-            })
-            .fail(function (err) {
-                plugin.lognotice("DB error: " + util.inspect(err));
-                err.what = 'db_error';
-                throw err;
-            });
+    multi.exec(function (err, records) {
+        if (err) {
+            plugin.lognotice("DB error: " + util.inspect(err));
+            err.what = 'db_error';
+            throw err;
+        }
+        return cb(null, ((create) ? new_record : false));
+    });
 };
 
 // Promote _grey_ record to _white_.
-exports.promote_to_white = function (connection, grey_rec) {
+exports.promote_to_white = function (connection, grey_rec, cb) {
     var plugin = this;
 
     var ts_now = Math.round(Date.now() / 1000);
@@ -565,25 +558,31 @@ exports.promote_to_white = function (connection, grey_rec) {
 
     // { first_connect: TS, whitelisted: TS, updated: TS, lifetime: TTL, tried: Integer, tried_when_greylisted: Integer }
     var white_rec = {
-        first_connect: grey_rec.created,
-        whitelisted: ts_now,
-        updated: ts_now,
-        lifetime: white_ttl,
-        tried_when_greylisted: grey_rec.tried,
-        tried: 1
+        first_connect : grey_rec.created,
+        whitelisted : ts_now,
+        updated : ts_now,
+        lifetime : white_ttl,
+        tried_when_greylisted : grey_rec.tried,
+        tried : 1
     };
 
     var white_key = plugin.craft_white_key(connection);
 
-    return plugin.db_hmset(white_key, white_rec)
-            .then(function () {
-                return plugin.db_call('expire', white_key, white_ttl)
-                        .then(function () { return white_rec; });
-            });
+    return plugin.redis.hmset(white_key, white_rec, function (err, result) {
+        if (err) {
+            plugin.lognotice("DB error: " + util.inspect(err));
+            err.what = 'db_error';
+            throw err;
+        }
+        plugin.redis.expire(white_key, white_ttl, function (err, result) {
+            plugin.lognotice("DB error: " + util.inspect(err));
+            return cb(err, result);
+        });
+    });
 };
 
 // Update _white_ record
-exports.update_white_record = function(key, record){
+exports.update_white_record = function (key, record, cb) {
     var plugin = this;
 
     var multi = plugin.redis.multi();
@@ -591,60 +590,40 @@ exports.update_white_record = function(key, record){
 
     // { first_connect: TS, whitelisted: TS, updated: TS, lifetime: TTL, tried: Integer, tried_when_greylisted: Integer }
     multi.hincrby(key, 'tried', 1);
-    multi.hmset(key, {updated: ts_now});
+    multi.hmset(key, {
+        updated : ts_now
+    });
     multi.expire(key, record.lifetime);
 
-    return Q.ninvoke(multi, 'exec')
-            .then(function(){ return record })
-            .fail(function (err) {
-                plugin.lognotice("DB error: " + util.inspect(err));
-                err.what = 'db_error';
-                throw err;
-            });
+    return multi.exec(function (err, record) {
+        if (err) {
+            plugin.lognotice("DB error: " + util.inspect(err));
+            err.what = 'db_error';
+            throw err;
+        }
+        return cb(null, record);
+    });
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-// @return [promise]        resulting DB data or a failure
-exports.db_lookup = function(key){
-    return this.db_call('HGETALL', key)
-        .then(function(result){
-            if (result && typeof result === 'object') { // groom known-to-be numeric values
-                ['created', 'updated', 'lifetime', 'tried', 'first_connect', 'whitelisted', 'tried_when_greylisted'].forEach(function(kk){
-                    var val = result[kk];
-                    if (val !== undefined) {
-                        result[kk] = Number(val);
-                    }
-                })
-            }
-            return result;
-        });
-};
 
-// @param what              Object with {field: val}
-// @return [promise]        resulting DB data or a failure
-exports.db_hmset = function(key, what) {
-    return this.db_call('HMSET', key, what);
-};
-
-// @return [promise]
-exports.db_incrby = function(key, field, value) {
-    return this.db_call('HINCRBY', key, field, value);
-};
-
-exports.db_call = function(op, key, args) {
+exports.db_lookup = function (key, cb) {
     var plugin = this;
 
-    var meth_args = [key];
-    if (args) {
-        meth_args.push(args);
-    }
-    plugin.logdebug('(redis) ', [op, meth_args].join(', '));
-
-    return Q.npost(plugin.redis, op, meth_args)
-            .fail(function (err) {
-                err.what = 'db_error';
-                throw err;
+    plugin.redis.hgetall(key, function (err, result) {
+        if (err) {
+            plugin.lognotice("DB error: " + util.inspect(err), key);
+        }
+        if (result && typeof result === 'object') { // groom known-to-be numeric values
+            ['created', 'updated', 'lifetime', 'tried', 'first_connect', 'whitelisted', 'tried_when_greylisted'].forEach(function (kk) {
+                var val = result[kk];
+                if (val !== undefined) {
+                    result[kk] = Number(val);
+                }
             });
+        }
+        return cb(null, result);
+    });
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -656,7 +635,9 @@ exports.addr_in_list = function (type, address) {
         return false;
     }
 
-    if (plugin.whitelist[type][address]) { return true; }
+    if (plugin.whitelist[type][address]) {
+        return true;
+    }
 
     try {
         var addr = new Address(address);
@@ -666,26 +647,25 @@ exports.addr_in_list = function (type, address) {
     }
 };
 
-exports.ip_in_list = function(ip){
+exports.ip_in_list = function (ip) {
     var plugin = this;
     var ipobj = ipaddr.parse(ip);
 
-    try {
-        var list = plugin.whitelist.ip;
+    var list = plugin.whitelist.ip;
 
-        for (var i = 0; i < list.length; i++) {
-            if (ipobj.match(list[i]))
+    for (var i = 0; i < list.length; i++) {
+        try {
+            if (ipobj.match(list[i])) {
                 return true;
-        }
-    } catch (e) {
-        plugin.logwarn('some error: ' + e.message + ' bt: ' + e.stack);
+            }
+        } catch (e) {}
     }
 
     return false;
 };
 
 // Match patterns in the list against (end of) domain
-exports.domain_in_list = function(list_name, domain) {
+exports.domain_in_list = function (list_name, domain) {
     var plugin = this;
     var list = plugin.list[list_name];
 
@@ -709,7 +689,10 @@ exports.check_rdns_for_special_cases = function (domain, label) {
 
     // ptr for these is in fact dynamic
     if (plugin.domain_in_list('dyndom', domain))
-        return {type: 'dynamic', why: 'rDNS considered dynamic: listed in dynamic.domains config list'};
+        return {
+            type : 'dynamic',
+            why : 'rDNS considered dynamic: listed in dynamic.domains config list'
+        };
 
     return false;
 };

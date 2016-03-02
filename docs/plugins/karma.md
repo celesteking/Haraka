@@ -1,18 +1,25 @@
 # karma - a scoring engine
 
-Karma is a heuristic scoring engine that uses connection metadata and other Haraka plugins as inputs. Connections scoring in excess of specified thresholds are [penalized](#penalties) in proportionate ways.
+Karma is a heuristic scoring engine that uses connection metadata and other Haraka plugins as inputs. Connections scoring in excess of specified thresholds are rewarded or [penalized](#penalties) in proportionate ways.
 
 ## Description
 
-Haraka includes some excellent plugins that detect message or sender patterns that are indicative of spam. [Some](sa-url) [plugins](snf-url) [have](fcrdns-url) [accuracy](uribl-url) rates above 95%. The extent that such plugins can be utilized depends on a sites tolerance for blocking legit messages. Sites that can't tolerate blocking ham are challenged to benefit from imperfect plugins.
+Haraka includes some excellent plugins that detect message or sender patterns that are indicative of spam. [Some][sa-url] [plugins][snf-url] [have][fcrdns-url] [accuracy][uribl-url] rates above 95%. Detecting messages incorrectly 5% of the time means that some portion of ham will get blocked and some portion of spam will get delivered. The traditional solution is to permit users to specify their filtering aggressiveness, and then suffer the consequences (blocked ham -vs- too much spam).
 
-Karma heuristically scores results from every plugin. By scoring a few "95+" plugins, accuracy rates above 99% are attainable. With a half dozen such plugins, 99.99% accuracy is attainable. With karma, good senders with good history can occasionally fail tests (false positives) and still deliver their mail. Senders with poor history have a harder time.
+By scoring and weighting several "95+" plugins, accuracy rates above 99% are attainable. With a half dozen such plugins, **99.99% accuracy** is attainable. With karma, good senders with good history can occasionally fail tests (false positives) and still deliver their mail. Senders with poor history will have a much harder time.
+
+### Karma Prereqs
+
+One challenge for mail filtering is that filters (or plugins, in Haraka's case) are usually called in sequence. A message passes from one filter to the next in a pipeline and each filter gets to choose "yeah or nay." In order for karma to transcend this limit, karma requires that **every** filter passes every message. Nearly all Haraka plugins have a `reject` or `deny` option for this reason.
+
+In order to score a filters results, filters must save their results to the [Result Store][results-url]. Karma will see that and apply the award specified in `karma.ini`.
+
 
 ## How Karma Works
 
-Karma takes a holistic view of **connections**, expecting other plugins to tolerate failures (deny/reject=false) and store processing [results](results-url). During the connection, karma progressively collects these results and applies the [awards](#awards) defined in `karma.ini`.
+Karma takes a holistic view of **connections**. During the connection, karma collects these results and applies the [result_awards](#awards) defined in `karma.ini`. Once a connection/message exceeds the threshold.negative score (default: -8), karma rejects it at the next [deny]hook.
 
-The scoring mechanism is not dissimilar to [SpamAssassin](sa-url), but Karma has some particular advantages:
+The scoring mechanism is not dissimilar to [SpamAssassin][sa-url], but Karma has some particular advantages:
 
     * Runs entirely in Node, so it's very fast
     * Async and very scalable.
@@ -21,7 +28,7 @@ The scoring mechanism is not dissimilar to [SpamAssassin](sa-url), but Karma has
     * Access to raw SMTP commands (data + formatting inspection)
     * Can reject connections before DATA (save lots of bandwidth)
 
-Karma is not a replacement for content filters. Karma focuses on the quality of the **connection**. Content filters (bayes\*) focus on the contents of the **message**. Karma works best *with* content filters.
+Karma is not a replacement for content filters. Karma focuses on the quality of the **connection**. Content filters (bayes\*) focus on the content of the **message**. Karma works best *with* content filters.
 
 
 # CONFIG
@@ -35,7 +42,7 @@ Karma allows the site administrator to control how much weight to assign to
 plugin results, providing a great deal of control over what results are
 worth rejecting for.
 
-Karma begins scoring the connection when the first packet arrives. The IP reputation, [sender OS](p0f-url), [GeoIP location](geoip-url), [DNSBL](dnsbl-url) listing, and [FCrDNS](fcrdns-url) are often a sufficient basis for rejecting a connection without ever blocking a ham.
+Karma begins scoring the connection when the first packet arrives. The IP reputation, [sender OS][p0f-url], [GeoIP location][geoip-url], [DNSBL][dnsbl-url] listing, and [FCrDNS][fcrdns-url] are often a sufficient basis for rejecting a connection without ever blocking a ham.
 
 Karma performs checks early and often, maximizing the penality it can exact upon bad mailers.
 
@@ -52,11 +59,11 @@ Karma history is computed as the number of good - bad connections.
 
 When each connection ends, *karma* records the result. When a sufficient history has been built for an IP or ASN, future connections from that address(es) will get a positive or negative karma award.
 
-The reward is purposefully small, to permit good senders in bad neighborhoods the ability to send.
+The reward is purposefully small, to permit good senders in bad neighborhoods to still send.
 
 ### <a name="delay"></a>Connection Delays
 
-Connection delays (aka tarpitting, teergrubing, early talker) slow down a SMTP conversation by inserting artificial delays. Early talking is when a sender talks out of turn. Karma punishes early talkers and increases connection delays adaptively as connection quality changes.
+Connection delays (aka tarpitting, teergrubing, early talker) slow down a SMTP conversation by inserting artificial delays. Karma increases connection delays adaptively as connection quality changes.
 
 Karma's delay goals:
 
@@ -81,14 +88,14 @@ In practice, most naughty senders abandon the connection when forced to
 wait more than a handful of seconds. `max` sets the maximum delay between
 responses.
 
-When using `karma`, do not use Haraka's `tarpit` or `early_talker` plugins.
+When using `karma`, do not use Haraka's `tarpit` plugin.
 
 ## Included Tests
 
 Connection data that karma considers:
 
 * [IP Reputation](#IP_Reputation)
-* [Neighbor reputation](#Neighbor_Reputation) (the network ASN)
+* [ASN reputation](#Neighbor_Reputation)
 * DENY events by other plugins
 * envelope sender from a spammy TLD
 * [malformed envelope addresses](#malformed_env)
@@ -102,31 +109,46 @@ the results](#awards) of other plugins. See karma.ini for a rich set of examples
 ### <a name="IP_Reputation"></a>IP Reputation
 
 Karma records the number of good, bad, and total connections.  The results
-are accessible so that other plugins as well.
+are accessible to other plugins as well.
 
     var karma = connection.results.get('karma');
 
 The karma result object contains at least the following:
 
-    connect: 0,       <- score for this connection
+    score: 0,         <- score for this connection
     history: 0,       <- score for all connections
-    total_connects: 0,
+       good: 0,       <- qty of past 'good' connections
+       bad: 0,        <- qty of past 'bad' connections
+    connections: 0,   <- total past connections
     pass: [],         <- tests that added positive karma
     fail: [],         <- tests that added negative karma
 
+If an IP has at least 5 connections and all are good or bad, and `all_good` or
+`all_bad` result will be added to the `pass` or `fail` test list. This are
+very good indicators of future connection quality and are scored in karma.ini.
 
-### <a name="Neighbor_Reputation"></a>Neighborhood Reputation (ASN)
+### <a name="Neighbor_Reputation"></a>ASN / Network Neighborhood Reputation
 
     [asn]
     enable=true    (default: true)
-    award=2        (default: 1 point)
+    report_as
 
 When [asn]enable is true, karma records the number of good and bad
-connections from each ASN. If [asn]award is > 0, that many karma points
-(plus or minus) are applied to future connections from that ASN.
+connections from each ASN.
 
 ASNs with less than 5 karma points in either direction are ignored.
 
+#### report\_as
+
+Store the ASN results as another plugin. Example: I set `report_as=connect.asn`, so that karma history for an ASN is reported with the ASN plugin data. A practical consequence of changing report_as is that the award location in karma.ini would need to change from:
+
+    NNN karma | pass | equals | asn_all_good |  2
+    NNN karma | fail | equals | asn_all_bad  | -3
+
+to: 
+
+    NNN connect.asn | pass | equals | asn_all_good |  2
+    NNN connect.asn | fail | equals | asn_all_bad  | -3
 
 ### <a name="malformed_env"></a>Malformed Envelope Addresses
 
@@ -160,8 +182,8 @@ To combat these bruteforce attacks several strategies are called for:
 ## LIMITATIONS
 
 Karma is most effective at filtering mail delivered by bots and rogue servers.
-Spam delivered by servers with good reputations flies past most of karma's
-checks. Expect to use karma *with* content filters.
+Spam delivered by servers with good reputations normally pass karma's checks.
+Expect to use karma *with* content filters.
 
 
 [p0f-url]: /manual/plugins/connect.p0f.html

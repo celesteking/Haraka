@@ -17,34 +17,34 @@ exports.register = function () {
 
 exports.load_config = function () {
     plugin.cfg = plugin.config.get('spf.ini', {
-            booleans: [
-                '-defer.helo_temperror',
-                '-defer.mfrom_temperror',
+        booleans: [
+            '-defer.helo_temperror',
+            '-defer.mfrom_temperror',
 
-                '-defer_relay.helo_temperror',
-                '-defer_relay.mfrom_temperror',
+            '-defer_relay.helo_temperror',
+            '-defer_relay.mfrom_temperror',
 
-                '-deny.helo_softfail',
-                '-deny.helo_fail',
-                '-deny.helo_permerror',
+            '-deny.helo_softfail',
+            '-deny.helo_fail',
+            '-deny.helo_permerror',
 
-                '-deny.mfrom_softfail',
-                '-deny.mfrom_fail',
-                '-deny.mfrom_permerror',
+            '-deny.mfrom_softfail',
+            '-deny.mfrom_fail',
+            '-deny.mfrom_permerror',
 
-                '-deny_relay.helo_softfail',
-                '-deny_relay.helo_fail',
-                '-deny_relay.helo_permerror',
+            '-deny_relay.helo_softfail',
+            '-deny_relay.helo_fail',
+            '-deny_relay.helo_permerror',
 
-                '-deny_relay.mfrom_softfail',
-                '-deny_relay.mfrom_fail',
-                '-deny_relay.mfrom_permerror',
+            '-deny_relay.mfrom_softfail',
+            '-deny_relay.mfrom_fail',
+            '-deny_relay.mfrom_permerror',
 
-                '-bypass.relaying',
-                '-bypass.auth',
-            ]
-        },
-        function () { plugin.load_config(); }
+            '-bypass.relaying',
+            '-bypass.auth',
+        ]
+    },
+    function () { plugin.load_config(); }
     );
 
     // when set, preserve legacy config settings
@@ -81,8 +81,8 @@ exports.hook_helo = exports.hook_ehlo = function (next, connection, helo) {
 
     // RFC 4408, 2.1: "SPF clients must be prepared for the "HELO"
     //           identity to be malformed or an IP address literal.
-    if (net_utils.is_ipv4_literal(helo)) {
-        connection.results.add(plugin, {skip: 'helo_ipv4_literal'});
+    if (net_utils.is_ip_literal(helo)) {
+        connection.results.add(plugin, {skip: 'ip_literal'});
         return next();
     }
 
@@ -184,7 +184,7 @@ exports.hook_mail = function (next, connection, params) {
             domain: host,
             emit: true,
         });
-        return plugin.return_results(next, connection, spf, 'mail', result,
+        return plugin.return_results(next, connection, spf, 'mfrom', result,
             '<'+mfrom+'>');
     };
 
@@ -202,14 +202,14 @@ exports.hook_mail = function (next, connection, params) {
     if (net_utils.is_private_ip(connection.remote_ip)) return next();
 
     // outbound (relaying), context=myself
-    net_utils.get_public_ip(function(e, sender_ip) {
+    net_utils.get_public_ip(function(e, my_public_ip) {
         if (e) {
             return ch_cb(e);
         }
-        if (!sender_ip) {
+        if (!my_public_ip) {
             return ch_cb(new Error("failed to discover public IP"));
         }
-        return spf.check_host(sender_ip, host, mfrom, ch_cb);
+        return spf.check_host(my_public_ip, host, mfrom, ch_cb);
     });
 };
 
@@ -220,7 +220,7 @@ exports.log_result = function (connection, scope, host, mfrom, result) {
         'domain="' + host + '"',
         'mfrom=<' + mfrom + '>',
         'result=' + result
-        ].join(' '));
+    ].join(' '));
 };
 
 exports.return_results = function(next, connection, spf, scope, result, sender) {

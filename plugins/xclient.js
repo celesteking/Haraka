@@ -6,7 +6,7 @@ var DSN = require('./dsn');
 var net = require('net');
 
 exports.hook_capabilities = function (next, connection) {
-    connection.capabilities.push('XCLIENT NAME ADDR PROTO HELO');
+    connection.capabilities.push('XCLIENT NAME ADDR PROTO HELO LOGIN');
     next();
 };
 
@@ -45,7 +45,7 @@ exports.hook_unrecognized_command = function (next, connection, params) {
         var match = /^([^=]+)=([^ ]+)/.exec(args[a]);
         if (match) {
             connection.logdebug(this, 'found key=' + match[1] + ' value=' + match[2]);
-            switch(match[1]) {
+            switch (match[1]) {
                 case 'addr':
                     // IPv6 is prefixed in the XCLIENT protocol
                     var ipv6;
@@ -66,11 +66,12 @@ exports.hook_unrecognized_command = function (next, connection, params) {
                     // SMTP or ESMTP
                     if (/^e?smtp/i.test(match[2])) {
                         xclient[match[1]] = match[2];
-                    } 
+                    }
                     break;
                 case 'name':
                 case 'port':
                 case 'helo':
+                case 'login':
                     if (!/\[(UNAVAILABLE|TEMPUNAVAIL)\]/i.test(match[2])) {
                         xclient[match[1]] = match[2];
                     }
@@ -78,7 +79,7 @@ exports.hook_unrecognized_command = function (next, connection, params) {
                 default:
                     connection.logwarn(this, 'unknown argument: ' + args[a]);
             }
-        } 
+        }
         else {
             connection.logwarn(this, 'unknown argument: ' + args[a]);
         }
@@ -98,6 +99,7 @@ exports.hook_unrecognized_command = function (next, connection, params) {
     connection.relaying = false;
     connection.remote_ip = xclient.addr;
     connection.remote_host = (xclient.name) ? xclient.name : undefined;
+    connection.remote_login = (xclient.login) ? xclient.login : undefined;
     connection.hello_host = (xclient.helo) ? xclient.helo : undefined;
     if (xclient.proto) {
         connection.greeting = (xclient.proto === 'esmtp') ? 'EHLO' : 'HELO';

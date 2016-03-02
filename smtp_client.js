@@ -10,6 +10,9 @@ var line_socket = require('./line_socket');
 var logger = require('./logger');
 var uuid = require('./utils').uuid;
 var utils = require('./utils');
+var config = require('./config');
+var tls_socket = require('./tls_socket');
+var ipaddr      = require('ipaddr.js');
 var constants = require('./constants')
 var DSN = require('./dsn');
 
@@ -21,9 +24,6 @@ var STATE = {
     DESTROYED: 4,
     SHUTDOWN: 5,
 };
-
-var tls_key;
-var tls_cert;
 
 function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
     events.EventEmitter.call(this);
@@ -43,6 +43,18 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
 
     var client = this;
 
+    var key = config.get('tls_key.pem', 'binary');
+    var cert = config.get('tls_cert.pem', 'binary');
+    var tls_options = (key && cert) ? { key: key, cert: cert } : {};
+    this.tls_config = tls_socket.load_tls_ini();
+    var config_options = ['ciphers','requestCert','rejectUnauthorized'];
+
+    for (var i = 0; i < config_options.length; i++) {
+        var opt = config_options[i];
+        if (this.tls_config.main[opt] === undefined) { continue; }
+        tls_options[opt] = this.tls_config.main[opt];
+    }
+
     this.socket.on('line', function (line) {
         client.emit('server_protocol', line);
         var matches = smtp_regexp.exec(line);
@@ -52,13 +64,24 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
             return;
         }
 
-        var code = matches[1],
-            cont = matches[2],
-            msg = matches[3];
+        var code = matches[1];
+        var cont = matches[2];
+        var msg = matches[3];
 
         client.response.push(msg);
         if (cont !== ' ') {
             return;
+        }
+
+        if (client.command === 'auth') {
+            if (code.match(/^3/) && cont === 'VXNlcm5hbWU6') {
+                client.emit('auth_username');
+                return;
+            }
+            else if (code.match(/^3/) && cont === 'UGFzc3dvcmQ6') {
+                client.emit('auth_password');
+                return;
+            }
         }
 
         if (client.command === 'ehlo') {
@@ -89,9 +112,7 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
                 client.emit('xclient', 'EHLO');
                 break;
             case 'starttls':
-                if (tls_key && tls_cert) {
-                    this.upgrade({key: tls_key, cert: tls_cert});
-                }
+                this.upgrade(tls_options);
                 break;
             case 'greeting':
                 client.connected = true;
@@ -121,6 +142,8 @@ function SMTPClient(port, host, connect_timeout, idle_timeout, max_mails) {
     this.socket.on('connect', function () {
         // Remove connection timeout and set idle timeout
         client.socket.setTimeout(((idle_timeout) ? idle_timeout : 300) * 1000);
+//        util.error('See: ' + util.inspect(client.socket));
+//        client.remote_ip = ipaddr.process(client.socket.remoteAddress).toString();
     });
 
     var closed = function (msg) {
@@ -200,6 +223,8 @@ SMTPClient.prototype.release = function () {
     this.removeAllListeners('dot');
     this.removeAllListeners('rset');
     this.removeAllListeners('auth');
+    this.removeAllListeners('client_protocol');
+    this.removeAllListeners('server_protocol');
     this.removeAllListeners('error');
     this.removeAllListeners('bad_code');
 
@@ -418,14 +443,13 @@ exports.get_client_plugin = function (plugin, connection, config, callback) {
                 }
 
                 if (smtp_client.response[line].match(/^STARTTLS/) && !secured) {
-                    if (c.enable_tls) {
-                        tls_key = plugin.config.get('tls_key.pem', 'binary');
-                        tls_cert = plugin.config.get('tls_cert.pem', 'binary');
-                        if (tls_key && tls_cert) {
-                            smtp_client.socket.on('secure', on_secured);
-                            smtp_client.send_command('STARTTLS');
-                            return;
-                        }
+                    if (!(c.host in smtp_client.tls_config.no_tls_hosts) &&
+                        !(smtp_client.remote_ip in smtp_client.tls_config.no_tls_hosts) &&
+                        c.enable_tls)
+                    {
+                        smtp_client.socket.on('secure', on_secured);
+                        smtp_client.send_command('STARTTLS');
+                        return;
                     }
                 }
 

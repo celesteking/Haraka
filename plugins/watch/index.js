@@ -10,14 +10,13 @@ var watchers = 0;
 
 exports.register = function () {
     var plugin = this;
+    plugin.inherits('redis');
 
     plugin.load_watch_ini();
 
-    // this.register_hook('init_master',  'init');
-    // this.register_hook('init_child',   'init');
     [
         'lookup_rdns', 'connect', 'helo', 'ehlo', 'mail', 'rcpt', 'rcpt_ok',
-        'data', 'data_post'
+        'data', 'data_post', 'reset_transaction'
     ]
     .forEach(function (hook) {
         plugin.register_hook(hook,  'get_incremental_results');
@@ -37,41 +36,34 @@ exports.load_watch_ini = function () {
     });
 };
 
-exports.hook_init_http = function (next, server, app) {
+exports.hook_init_http = function (next, server) {
     var plugin = this;
 
-    // var wss_url = 'ws[s]://' + wss_host + ':' + wss_port + '/';
-    app.use('/watch/wss_conf', function(req, res, app_next){
+    server.http.app.use('/watch/wss_conf', function (req, res, app_next) {
         // pass config information to the WS client
         var client = { sampling: plugin.cfg.main.sampling };
         if (plugin.cfg.wss.url) client.wss_url = plugin.cfg.wss.url;
         res.end(JSON.stringify(client));
     });
 
-    var express;
-    try { express = require('express'); }
-    catch (ignore) {
-        plugin.logerror("express not installed, try 'npm install express'");
-        return next();
-    }
+    var htdocs = plugin.cfg.wss.htdocs || __dirname + '/html';
+    server.http.app.use('/watch/', server.http.express.static(htdocs));
 
-    if (express) {
-        app.use('/watch/', express.static(__dirname + '/html'));
-    }
-
+    plugin.loginfo('watch init_http done');
     return next();
 };
 
-exports.hook_init_wss = function (next, server, new_wss) {
-    var plugin    = this;
+exports.hook_init_wss = function (next, server) {
+    var plugin = this;
+    plugin.loginfo('watch init_wss');
 
-    wss = new_wss;
+    wss = server.http.wss;
 
-    wss.on('error', function(error) {
+    wss.on('error', function (error) {
         plugin.loginfo("server error: " + error);
     });
 
-    wss.on('connection', function(ws) {
+    wss.on('connection', function (ws) {
         watchers++;
         // broadcast updated watcher count
         wss.broadcast({ watchers: watchers });
@@ -81,35 +73,70 @@ exports.hook_init_wss = function (next, server, new_wss) {
         // send message to just this websocket
         // ws.send('welcome!');
 
-        ws.on('error', function(error) {
+        ws.on('error', function (error) {
             // plugin.loginfo("client error: " + error);
         });
 
-        ws.on('close', function(code, message) {
+        ws.on('close', function (code, message) {
             // plugin.loginfo("client closed: " + message + '('+code+')');
             watchers--;
         });
 
-        ws.on('message', function(message) {
+        ws.on('message', function (message) {
             // plugin.loginfo("received from client: " + message);
         });
     });
 
-    wss.broadcast = function(data) {
+    wss.broadcast = function (data) {
         var f = JSON.stringify(data);
-        for(var i in this.clients) {
+        for (var i in this.clients) {
             this.clients[i].send(f);
         }
     };
 
+    plugin.loginfo('watch init_wss done');
     return next();
 };
 
-exports.get_incremental_results = function (next, connection) {
-    this.get_connection_results(connection);
-    if (connection.transaction) {
-        this.get_transaction_results(connection.transaction);
+exports.hook_connect_init = function (next, connection) {
+    var plugin = this;
+
+    if (!server.notes.redis) {
+        connection.logerror(plugin, "no server.notes.redis!");
+        return next();
     }
+
+    plugin.redis_subscribe(connection, function () {
+        connection.notes.redis.on('pmessage', function (pattern, channel, message) {
+            plugin.check_redis_sub_msg(connection, message);
+        });
+        next();
+    });
+};
+
+exports.check_redis_sub_msg = function (connection, message) {
+    var plugin = this;
+    // connection.loginfo(plugin, message);
+    // {"plugin":"karma","result":{"fail":"spamassassin.hits"}}
+    // {"plugin":"connect.geoip","result":{"country":"CN"}}
+
+    var m = JSON.parse(message);
+    connection.logprotocol(plugin, message);
+
+    var req = { uuid : connection.uuid };
+    req[m.plugin] = m.result;
+
+    wss.broadcast(req);
+};
+
+exports.get_incremental_results = function (next, connection) {
+    var plugin = this;
+
+    plugin.get_connection_results(connection);
+    if (connection.transaction) {
+        plugin.get_transaction_results(connection.transaction);
+    }
+
     return next();
 };
 
@@ -127,7 +154,7 @@ exports.queue_ok = function (next, connection, msg) {
     this.get_incremental_results(incrDone, connection);
 };
 
-exports.w_deny = function(next, connection, params) {
+exports.w_deny = function (next, connection, params) {
     var plugin = this;
     // this.loginfo(this, params);
     var pi_code   = params[0];  // deny code?
@@ -154,8 +181,9 @@ exports.w_deny = function(next, connection, params) {
 
     connection.logdebug(this, "watch sending dark red to "+pi_name);
     var bg_class = pi_code === DENYSOFT ? 'bg_dyellow' : 'bg_dred';
-    if (req[pi_name]) req[pi_name].classy = bg_class;
-    if (!req[pi_name]) req[pi_name] = { classy: bg_class };
+    var report_as = plugin.get_plugin_name(pi_name);
+    if (req[report_as]) req[report_as].classy = bg_class;
+    if (!req[report_as]) req[report_as] = { classy: bg_class };
 
     wss.broadcast(req);
     return next();
@@ -172,6 +200,7 @@ exports.disconnect = function (next, connection) {
     };
 
     this.get_incremental_results(incrDone, connection);
+    this.redis_unsubscribe(connection);
 };
 
 exports.get_connection_results = function (connection) {
@@ -188,7 +217,7 @@ exports.get_connection_results = function (connection) {
         relay      : get_relay(connection),
         helo       : get_helo(connection),
         early      : get_early,
-        duration   : { newval: utils.elapsed(connection.start_time) },
+        queue      : { newval: utils.elapsed(connection.start_time) },
     };
 
     // see if changed since we last sent
@@ -209,6 +238,7 @@ exports.get_connection_results = function (connection) {
     for (var name in result_store) {
         plugin.get_plugin_result(req, result_store, name);
     }
+
     wss.broadcast(req);
 };
 
@@ -226,7 +256,18 @@ exports.get_transaction_results = function (txn) {
     for (var name in result_store) {
         plugin.get_plugin_result(req, result_store, name);
     }
+
     wss.broadcast(req);
+};
+
+exports.get_plugin_name = function (pi_name) {
+
+    // coalesce auth/* and queue/* plugins to 'auth' and 'queue'
+    if (/^(queue|auth)\//.test(pi_name)) {
+        return pi_name.split('/').shift();
+    }
+
+    return pi_name;
 };
 
 exports.get_plugin_result = function (req, res, name) {
@@ -235,11 +276,13 @@ exports.get_plugin_result = function (req, res, name) {
 
     var formatted = plugin.format_results(name, res[name]);
     if (res[name]._watch_saw === JSON.stringify(formatted)) {
-        return;  // same as cached, don't report
+        // plugin.loginfo(name + ' skip, same as cached');
+        return;  // don't report
     }
 
     // save to request that gets sent to client
-    req[name] = formatted;
+    // plugin.loginfo(name + ' saved to res');
+    req[ plugin.get_plugin_name(name) ] = formatted;
 
     // cache formatted result to avoid sending dups to client
     res[name]._watch_saw = JSON.stringify(formatted);
@@ -262,7 +305,7 @@ exports.format_results = function (pi_name, r) {
 exports.get_class = function (pi_name, r) {
     var plugin = this;
 
-    switch(pi_name) {
+    switch (pi_name) {
         case 'bounce':
             if (r.isa === 'no') return 'bg_lgreen';
             if (r.fail.length)  return 'bg_red';
@@ -281,6 +324,8 @@ exports.get_class = function (pi_name, r) {
                            r.reason[0].comment : '';
             return r.result === 'pass'      ? 'bg_green' :
                     comment === 'no policy' ? 'bg_yellow' : 'bg_red';
+        case 'data.uribl':
+            return r.fail.length ? 'bg_red' : 'bg_lgreen';
         case 'dnsbl':
             return r.fail.length ? 'bg_red' :
                    r.pass.length ? 'bg_green' : 'bg_lgreen';
@@ -289,15 +334,16 @@ exports.get_class = function (pi_name, r) {
                    r.fail.length > 0 ? 'bg_yellow' :
                    r.pass.length > 5 ? 'bg_green' : 'bg_lgreen';
         case 'karma':
-            if (r.connect === undefined) {
+            if (r.score === undefined) {
                 var history = parseFloat(r.history) || 0;
                 return history >  2 ? 'bg_green' :
                        history < -1 ? 'bg_red'   : 'bg_yellow';
             }
-            var score = parseFloat(r.connect) || 0;
-            return score > 2  ? 'bg_green'  :
+            var score = parseFloat(r.score) || 0;
+            return score > 3  ? 'bg_green'  :
                    score > 0  ? 'bg_lgreen' :
-                   score < -1 ? 'bg_red'    : 'bg_yellow';
+                   score < -3 ? 'bg_red'    :
+                   score < 0  ? 'bg_lred'   : 'bg_yellow';
         case 'relay':
             return (r.pass.length && r.fail.length === 0) ? 'bg_green' :
                     r.pass.length ? 'bg_lgreen' :
@@ -311,14 +357,21 @@ exports.get_class = function (pi_name, r) {
                     r.pass.length ? 'bg_lgreen' : '';
         case 'spamassassin':
             var hits = parseFloat(r.hits);
-            return hits > 3 ? 'bg_red' :
-                   hits > 1 ? 'bg_lred' :
+            return hits > 5 ? 'bg_red' :
+                   hits > 2 ? 'bg_yellow' :
                    hits < 0 ? 'bg_green' : 'bg_lgreen';
         case 'spf':
             return r.result === 'Pass' ? 'bg_green' :
                    r.result === 'Neutral' ? 'bg_lgreen' :
                    /fail/i.test(r.result) ? 'bg_red' :
                    /error/i.test(r.result) ? 'bg_yellow' : '';
+        case 'rspamd':
+            return r.is_spam === true ? 'bg_red' :
+                   r.action  === 'greylist' ? 'bg_grey' :
+                   r.is_skipped === true ? '' :
+                   r.score > 5 ? 'bg_lred' :
+                   r.score < 0 ? 'bg_green' :
+                   r.score < 3 ? 'bg_lgreen' : 'bg_yellow';
         default:
             return (r.pass.length && r.fail.length === 0) ? 'bg_green' :
                     r.pass.length ? 'bg_lgreen' :
@@ -332,7 +385,7 @@ exports.get_value = function (pi_name, r) {
     var plugin = this;
 
     // replace the plugin name shown with...
-    switch(pi_name) {
+    switch (pi_name) {
         case 'connect.asn':
             return r.asn;
         case 'connect.p0f':
@@ -346,16 +399,12 @@ exports.get_value = function (pi_name, r) {
 
 exports.get_title = function (pi_name, r) {
     var plugin = this;
+    // title: the value shown in the HTML tooltip
 
-    // controls the value shown in the HTML tooltip
-    switch(pi_name) {
+    switch (pi_name) {
         case 'spamassassin':
             var hits = parseFloat(r.hits);
-            return r.flag + ', ' + hits + ' hits';
-        case 'connect.asn':
-            var title = r.asn;
-            if (r.net) title += ' ' + r.net;
-            return title;
+            return r.flag + ', ' + hits + ' hits, time: ' + r.time;
         case 'connect.p0f':
             return r.os_name +' '+ r.os_flavor + ', ' + r.distance + ' hops';
         case 'bounce':
@@ -369,6 +418,7 @@ exports.get_title = function (pi_name, r) {
             return r.result === 'pass' ? r.result :
                     [ r.result, r.disposition, comment ].join(', ');
         case 'queue':
+            // remove transaction suffix
             var bits = r.human.split(/\s+/);
             bits.pop();
             return bits.join(' ');
@@ -393,6 +443,7 @@ function get_local_port (connection) {
 function get_remote_host (connection) {
     var host  = connection.remote_host || '';
     var ip    = connection.remote_ip || '';
+    var hostShort = host;
 
     if (host) {
         switch (host) {
@@ -401,12 +452,13 @@ function get_remote_host (connection) {
                 host = '';
                 break;
         }
+        if (host.length > 22) {
+            hostShort = '...' + host.substring(host.length-20);
+        }
     }
 
     return {
-        newval: host ? (host.length > 22 ?
-                       ('...'+host.substring(host.length-20) + ' / ' + ip)
-                     : host + ' / ' + ip) : ip,
+        newval: host ? (hostShort + ' / ' + ip) : ip,
         title: host ? (host + ' / ' + ip) : ip,
     };
 }
@@ -441,8 +493,9 @@ function get_mailfrom(txn) {
 
 function get_recipients(txn) {
 
-    var d = [], t = [];
-    txn.rcpt_to.forEach(function (ea){
+    var d = [];
+    var t = [];
+    txn.rcpt_to.forEach(function (ea) {
         try { var rcpt = ea.address(); }
         catch (ignore) { }
         if (!rcpt) {

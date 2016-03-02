@@ -2,10 +2,17 @@
 /* jshint jquery: true, maxlen: 130 */
 /* global window, XMLHttpRequest, WebSocket */
 
-var ws, connect_cols, helo_cols, mail_from_cols, rcpt_to_cols, data_cols, total_cols;
-var cxn_cols, txn_cols;
+var ws;
+var connect_cols;
+var helo_cols;
+var mail_from_cols;
+var rcpt_to_cols;
+var data_cols;
+var total_cols;
+var cxn_cols;
+var txn_cols;
 
-var connect_plugins  = ['connect.geoip','connect.p0f','connect.asn','dnsbl', 'early', 'connect.fcrdns'];
+var connect_plugins  = ['connect.geoip','connect.p0f','connect.asn','dnsbl', 'early_talker', 'connect.fcrdns'];
 var helo_plugins     = ['helo.checks','tls','auth','relay','spf'];
 var mail_from_plugins= ['spf','mail_from.is_resolvable'];
 var rcpt_to_plugins  = ['access','rcpt_to.in_host_list']; // ,'rcpt_to.qmail_deliverable'];
@@ -15,7 +22,7 @@ var data_plugins     = ['bounce','data.headers','karma','spamassassin','clamd', 
 // redrawn.
 var seen_plugins     = connect_plugins.concat(helo_plugins, mail_from_plugins,
                        rcpt_to_plugins, data_plugins);
-var ignore_seen      = ['local_port', 'remote_host', 'helo', 'mail_from', 'rcpt_to', 'duration', 'queue'];
+var ignore_seen      = ['local_port', 'remote_host', 'helo', 'mail_from', 'rcpt_to', 'queue'];
 
 var rows_showing = 0;
 
@@ -32,12 +39,12 @@ function newRowConnectRow1 (data, uuid, txnId) {
     }
 
     return [
-    '<tr class="spacer"><td colspan="'+total_cols+'"></td></tr>',
-    '<tr class="'+uuid+'">',
-    '<td class="uuid uuid_tiny got" rowspan=2 title='+data.uuid+'>'+ data.uuid+'</td>',
-    '<td class="remote_host got" colspan=' + (connect_cols - 1) +' title="'+ host.title+'">'+host.newval+'</td>',
-    '<td class="local_port bg_dgreen" title="connected">'+port+'</td>',
-    '<td class="helo" colspan="' + helo_cols + '"></td>',
+        '<tr class="spacer"><td colspan="'+total_cols+'"></td></tr>',
+        '<tr class="'+uuid+'">',
+        '<td class="uuid uuid_tiny got" rowspan=2 title='+data.uuid+'>'+ data.uuid+'</td>',
+        '<td class="remote_host got" colspan=' + (connect_cols - 1) +' title="'+ host.title+'">'+host.newval+'</td>',
+        '<td class="local_port bg_dgreen" title="connected">'+port+'</td>',
+        '<td class="helo lgrey" colspan="' + helo_cols + '"></td>',
     ];
 }
 
@@ -48,9 +55,10 @@ function newRowConnectRow2 (data, uuid, txnId) {
     var res = [];
     connect_plugins.forEach(function(plugin) {
         var nv = shorten_pi(plugin);
-        var newc = '', tit = '';
+        var newc = '';
+        var tit = '';
         if (data[plugin]) {       // not always updated
-            if (data[plugin].newc)   newc = data[plugin].classy;
+            if (data[plugin].classy) newc = data[plugin].classy;
             if (data[plugin].newval) nv   = data[plugin].newval;
             if (data[plugin].title)  tit  = data[plugin].title;
         }
@@ -80,9 +88,9 @@ function newRow(data, uuid) {
         '<td class="rcpt_to" colspan=' + rcpt_to_cols + '></td>'
     );
     data_plugins.slice(0,data_cols).forEach(function(plugin) {
-            rowResult.push('<td class=' +css_safe(plugin)+ '>' +
-                    shorten_pi(plugin) + '</td>');
-        });
+        rowResult.push('<td class=' +css_safe(plugin)+ '>' +
+            shorten_pi(plugin) + '</td>');
+    });
 
     rowResult.push(
         '<td class=queue title="not queued" rowspan=2></td></tr>',
@@ -127,7 +135,6 @@ function updateRow(row_data, selector) {
         var td = row_data[td_name];
         if (typeof td !== 'object' ) continue;
 
-        if (td_name === 'duration') td_name = 'queue';
         var td_name_css = css_safe(td_name);
         var td_sel = selector + ' > td.' + td_name_css;
 
@@ -262,7 +269,6 @@ function update_seen(plugin) {
     if (seen_plugins.indexOf(plugin) !== -1) return;
     if (ignore_seen.indexOf(plugin) !== -1) return;
 
-    $('#messages').append(', refresh('+plugin+') ');
     seen_plugins.push(plugin);
 
     var bits = plugin.split('.');
@@ -284,6 +290,7 @@ function update_seen(plugin) {
                 data_plugins.push(plugin);
                 break;
         }
+        $('#messages').append(', refresh('+plugin+') ');
         return reset_table();
     }
 
@@ -291,10 +298,8 @@ function update_seen(plugin) {
     if (bits.length === 2) {
         switch (bits[0]) {
             case 'auth':  // gets coalesced under the 'HELO auth' box
-            case 'queue': // gets coalesced in the 'QUEUE' box
-                break;
+                return;
         }
-        return;
     }
 
     $('#messages').append(', uncategorized('+plugin+') ');
@@ -304,9 +309,9 @@ function update_seen(plugin) {
 
 function prune_table() {
     rows_showing++;
-    var max = 100;
+    var max = 200;
     if (rows_showing < max) return;
-    $('table#connections > tbody > tr:gt('+(max*3)+')').fadeOut(8000, function() {
+    $('table#connections > tbody > tr:gt('+(max*3)+')').fadeOut(2000, function() {
         $(this).remove();
     });
     rows_showing = $('table#connections > tbody > tr').length;
@@ -331,7 +336,7 @@ function display_th() {
         '<th id=rcpt_to   colspan='+rcpt_to_cols+' title="Envelope Recipient / RFC5321.RcptTo / Forward Path">RCPT TO</th>',
         '<th id=data      colspan='+data_cols+' title="DATA, the message content, comprised of the headers and body).">DATA</th>',
         '<th id=queue title="When a message is accepted, it is delivered into the local mail queue.">QUEUE</th>',
-        ].join('\n\t')
+    ].join('\n\t')
     ).tipsy();
     $('table#connections > thead > tr#labels > th').tipsy();
     $('table#connections > tfoot > tr#helptext')
@@ -361,6 +366,7 @@ function shorten_pi (name) {
 
     var trims = {
         spamassassin: 'spam',
+        early_talker: 'early',
         'rcpt_to.qmail_deliverable': 'qmd',
         'rcpt_to.in_host_list': 'host_list',
         'mail_from.is_resolvable': 'dns',

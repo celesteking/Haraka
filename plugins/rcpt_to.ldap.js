@@ -4,12 +4,12 @@ var util = require('util');
 
 exports.register = function() {
     var plugin = this;
-    plugin.inherits('host_list_base');
+    plugin.inherits('rcpt_to.host_list_base');
 
     try {
         plugin.ldap = require('ldapjs');
     }
-    catch(e) {
+    catch (e) {
         plugin.logerror("failed to load ldapjs, " +
             " try installing it: npm install ldapjs");
         return;

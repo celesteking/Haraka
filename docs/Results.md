@@ -171,3 +171,49 @@ To retrieve a matching pattern:
     if (r.has('plugin_name', 'pass', /^some_test/)) {
         // some_test passed (2x)
     }
+
+### Private Results
+
+To store structured data in results that are hidden from the human and
+human_html output, prefix the name of the key with an underscore.
+
+Example:
+
+```js
+connection.results.add(plugin, { _hidden: 'some data' });
+```
+
+## Redis Pub/Sub
+
+If a redis client is found on server.notes.redis, then new results are JSON
+encoded and published to Redis on the channel named `result-UUID`. Other
+plugins can subscribe to these publish events by psubscribing (pattern
+subscribe) to the channel named `result-UUID*`.  Replace UUID with the
+connection UUID.
+
+This is from the karma plugin, subscribing on the `connect_init` hook.
+
+```js
+exports.register = function (next, server) {
+    this.inherits('redis');
+}
+exports.hook_connect_init = function (next, connection) {
+    var plugin = this;
+    plugin.redis_subscribe(connection, function () {
+        connection.notes.redis.on('pmessage', function (pattern, channel, message) {
+            // do fun stuff with messages that look like this
+            // {"plugin":"karma","result":{"fail":"spamassassin.hits"}}
+            // {"plugin":"connect.geoip","result":{"country":"CN"}}
+        });
+        next();
+    });
+}
+```
+
+It's also wise to unsubscribe. It's easy to do on the `disconnect` hook:
+
+```js
+    exports.hook_disconnect = function (next, connection) {
+        this.redis_unsubscribe(connection);
+    }
+```

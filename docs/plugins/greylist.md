@@ -34,7 +34,6 @@ We define the following time periods:
 The greylist algo is as following:
 
   * Party connects. All FcrDNS & DNSWL checks are run by earlier plugins.
-  * If party sends bounce or <special> envelope, skip _recipient_ and do _data_ processing.
   * Party sends _recipient_
     * If not already whitelisted
         * Check _tuple_ color (compare current TS against record creation TS)
@@ -80,9 +79,12 @@ For _grey_:
 
 ### Whitelisting
 
-It's possible to whitelist hosts using the following config files:
+It's possible to whitelist hosts using the following section in greylist.ini config file:
 
-  * greylist.ip.whitelist         IP or subnet (prefix notation)
-  * greylist.envelope.whitelist   MAIL FROM (email or domain)
-  * greylist.recipient.whitelist  RCPT TO  (email or domain)
+  * ip\_whitelist               IP or subnet (prefix notation)
+  * envelope\_whitelist         MAIL FROM (email or domain)
+  * recipient\_whitelist        RCPT TO  (email or domain)
 
+List of known dynamic hosts, to use the IP instead of the domain:
+
+  * special\_dynamic\_domains    Domain

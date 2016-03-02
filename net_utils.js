@@ -1,9 +1,18 @@
 'use strict';
 
+// node.js built-ins
+var dns    = require('dns');
+var net    = require('net');
+
+// haraka libraries
 var logger = require('./logger');
 var config = require('./config');
-var net    = require('net');
+
+// npm modules
+var async    = require('async');
 var punycode = require('punycode');
+var ipaddr    = require('ipaddr.js');
+var sprintf   = require('sprintf-js').sprintf;
 
 var public_suffix_list = {};
 load_public_suffix_list();
@@ -24,7 +33,7 @@ exports.is_public_suffix = function (host) {
 
     var puny;
     try { puny = punycode.toUnicode(host); }
-    catch(e) {}
+    catch (e) {}
     if (puny && public_suffix_list[puny]) return true;
 
     return false;
@@ -75,7 +84,7 @@ exports.top_level_tlds = top_level_tlds;
 exports.two_level_tlds = two_level_tlds;
 exports.three_level_tlds = three_level_tlds;
 
-exports.split_hostname = function(host,level) {
+exports.split_hostname = function (host,level) {
     if (!level || (level && !(level >= 1 && level <= 3))) {
         level = 2;
     }
@@ -125,7 +134,8 @@ exports.ip_to_long = function (ip) {
 };
 
 exports.octets_in_string = function (str, oct1, oct2) {
-    var oct1_idx, oct2_idx;
+    var oct1_idx;
+    var oct2_idx;
 
     // test the largest of the two octets first
     if (oct2.length >= oct1.length) {
@@ -149,7 +159,7 @@ exports.octets_in_string = function (str, oct1, oct2) {
     return true;
 };
 
-exports.is_ip_in_str = function(ip, str) {
+exports.is_ip_in_str = function (ip, str) {
     if (!str) { return false; }
     if (!ip) { return false; }
     if (!net.isIPv4(ip)) {
@@ -251,6 +261,10 @@ exports.is_private_ip = function (ip) {
 // backwards compatibility for non-public modules. Sunset: v3.0
 exports.is_rfc1918 = exports.is_private_ip;
 
+exports.is_ip_literal = function (host) {
+    return exports.get_ipany_re('^\\[','\\]$','').test(host) ? true : false;
+};
+
 exports.is_ipv4_literal = function (host) {
     return /^\[(\d{1,3}\.){3}\d{1,3}\]$/.test(host) ? true : false;
 };
@@ -312,29 +326,6 @@ function load_public_suffix_list() {
     var entries = Object.keys(public_suffix_list).length;
     logger.loginfo('loaded '+ entries +' Public Suffixes');
 }
-
-exports.same_ipv4_network = function (ip, ipList) {
-    if (!ipList || !ipList.length) {
-        logger.logerror('same_ipv4_network, no ip list!');
-        return false;
-    }
-    if (!net.isIPv4(ip)) {
-        logger.logerror('same_ipv4_network, IP is not IPv4!');
-        return false;
-    }
-
-    var first3 = ip.split('.').slice(0,3).join('.');
-
-    for (var i=0; i < ipList.length; i++) {
-        if (!net.isIPv4(ipList[i])) {
-            logger.logerror('same_ipv4_network, IP in list is not IPv4!');
-            continue;
-        }
-        if (first3 === ipList[i].split('.').slice(0,3).join('.'))
-            return true;
-    }
-    return false;
-};
 
 function load_tld_files () {
     config.get('top-level-tlds','list').forEach(function (tld) {
@@ -429,3 +420,77 @@ function get_stun_server () {
     ];
     return servers[Math.floor(Math.random()*servers.length)];
 }
+
+exports.get_ipany_re = function (prefix, suffix, modifier) {
+    /* jshint maxlen: false */
+    if (prefix === undefined) prefix = '';
+    if (suffix === undefined) suffix = '';
+    if (modifier === undefined) modifier = 'mg';
+    return new RegExp(
+        prefix +
+        '(' +    // capture group
+        '(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))|(?:(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){6})(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:::(?:(?:(?:[0-9a-fA-F]{1,4})):){5})(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})))?::(?:(?:(?:[0-9a-fA-F]{1,4})):){4})(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,1}(?:(?:[0-9a-fA-F]{1,4})))?::(?:(?:(?:[0-9a-fA-F]{1,4})):){3})(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,2}(?:(?:[0-9a-fA-F]{1,4})))?::(?:(?:(?:[0-9a-fA-F]{1,4})):){2})(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,3}(?:(?:[0-9a-fA-F]{1,4})))?::(?:(?:[0-9a-fA-F]{1,4})):)(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,4}(?:(?:[0-9a-fA-F]{1,4})))?::)(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,5}(?:(?:[0-9a-fA-F]{1,4})))?::)(?:(?:[0-9a-fA-F]{1,4})))|(?:(?:(?:(?:(?:(?:[0-9a-fA-F]{1,4})):){0,6}(?:(?:[0-9a-fA-F]{1,4})))?::))))' + // complex ipv4 + ipv6
+        ')' +    // end capture
+        suffix,
+        modifier
+    );
+};
+
+exports.get_ips_by_host = function (hostname, done) {
+    var ips = [];
+    var errors = [];
+
+    async.parallel(
+        [
+            function (iter_done) {
+                dns.resolve4(hostname, function resolve_cb (err, res) {
+                    if (err) {
+                        errors.push(err.message);
+                        return iter_done();
+                    }
+                    for (var i=0; i<res.length; i++) {
+                        ips.push(res[i]);
+                    }
+                    iter_done(null, true);
+                });
+            },
+            function (iter_done) {
+                dns.resolve6(hostname, function resolve_cb (err, res) {
+                    if (err) {
+                        errors.push(err.message);
+                        return iter_done();
+                    }
+                    for (var j=0; j<res.length; j++) {
+                        ips.push(res[j]);
+                    }
+                    iter_done(null, true);
+                });
+            },
+        ],
+        function (err, async_list) {
+            // if multiple IPs are included in the iterations, then the async
+            // result here will be an array of nested arrays. Not quite what
+            // we want. Return the merged ips array.
+            done(errors, ips);
+        }
+    );
+};
+
+exports.ipv6_reverse = function(ipv6){
+    var ipv6 = ipaddr.parse(ipv6);
+    return ipv6.toNormalizedString()
+        .split(':')
+        .map(function (n) {
+            return sprintf('%04x', parseInt(n, 16));
+        })
+        .join('')
+        .split('')
+        .reverse()
+        .join('.');
+};
+
+exports.ipv6_bogus = function(ipv6){
+    var ipCheck = ipaddr.parse(ipv6);
+    if (ipCheck.range() !== 'unicast') { return true; }
+    return false;
+};

@@ -1,22 +1,35 @@
 language: node_js
 node_js:
-    - "0.12"
+#   - "0.6"     # no longer supported by async
+#   - "0.8"     # no longer supported by iconv
     - "0.10"
-#   - "0.8"   # no longer supported by iconv
-#   - "0.6"   # no longer supported by async
-    - "iojs-v1.8.1"
-    - "iojs"
+    - "0.12"
+    - "4.2"
 
 services:
     - redis-server
+    
+# these are required for building on node.js 4.0 / io.js v3
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-4.8
+env:
+  - "CXX=g++-4.8"
+# end: these are required for building on node.js 4.0 / io.js v3
 
-matrix:
-    allow_failures:
-        - node_js: "0.8"
-        - node_js: "iojs"
-#       - node_js: "0.6"
+before_script:
+    - npm install -g grunt-cli
+
+script:
+    - grunt lint
+    - node run_tests
 
 after_success:
-    - npm run coveralls
+    - npm install istanbul codecov.io
+    - ./node_modules/istanbul/lib/cli.js cov run_tests
+    - cat ./coverage/coverage.json | ./node_modules/codecov.io/bin/codecov.io.js
 
 sudo: false

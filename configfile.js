@@ -8,7 +8,7 @@ var yaml = require('js-yaml');
 // for "ini" type files
 var regex = exports.regex = {
     section:        /^\s*\[\s*([^\]]*?)\s*\]\s*$/,
-    param:          /^\s*([\w@\._\-\/]+)\s*=\s*(.*?)\s*$/,
+    param:          /^\s*([\w@:\._\-\/]+)\s*(?:=\s*(.*?)\s*)?$/,
     comment:        /^\s*[;#].*$/,
     line:           /^\s*(.*?)\s*$/,
     blank:          /^\s*$/,
@@ -30,6 +30,7 @@ cfreader._watchers = {};
 cfreader._enoent_timer = false;
 cfreader._enoent_files = {};
 cfreader._sedation_timers = {};
+cfreader._overrides = {};
 
 cfreader.on_watch_event = function (name, type, options, cb) {
     return function (fse, filename) {
@@ -40,7 +41,7 @@ cfreader.on_watch_event = function (name, type, options, cb) {
             logger.loginfo('Reloading file: ' + name);
             cfreader.load_config(name, type, options);
             delete cfreader._sedation_timers[name];
-            if (typeof cb === 'function') cb(); 
+            if (typeof cb === 'function') cb();
         }, 5 * 1000);
         logger.logdebug('Detected ' + fse + ' on ' + name);
         if (fse !== 'rename') return;
@@ -120,15 +121,25 @@ cfreader.watch_file = function (name, type, cb, options) {
 };
 
 cfreader.get_cache_key = function (name, options) {
-    // this ordering of objects isn't guaranteed to be consistent, but I've
-    // heard that it typically is.
-    if (options) return name + JSON.stringify(options);
+    var result;
 
-    if (cfreader._read_args[name] && cfreader._read_args[name].options) {
-        return name + JSON.stringify(cfreader._read_args[name].options);
+    // Ignore options etc. if this is an overriden value
+    if (cfreader._overrides[name]) {
+        result = name;
+    }
+    else if (options) {
+        // this ordering of objects isn't guaranteed to be consistent, but I've
+        // heard that it typically is.
+        result = name + JSON.stringify(options);
+    }
+    else if (cfreader._read_args[name] && cfreader._read_args[name].options) {
+        result = name + JSON.stringify(cfreader._read_args[name].options);
+    }
+    else {
+        result = name;
     }
 
-    return name;
+    return result;
 };
 
 cfreader.read_config = function(name, type, cb, options) {
@@ -145,9 +156,16 @@ cfreader.read_config = function(name, type, cb, options) {
     // Check cache first
     if (!process.env.WITHOUT_CONFIG_CACHE) {
         var cache_key = cfreader.get_cache_key(name, options);
-        if (cache_key in cfreader._config_cache) {
+        if (cfreader._config_cache[cache_key]) {
             //logger.logdebug('Returning cached file: ' + name);
-            return cfreader._config_cache[cache_key];
+            var cached = cfreader._config_cache[cache_key];
+            // Make sure that any .ini file booleans are applied
+            if (type === 'ini' && (options && options.booleans &&
+                Array.isArray(options.booleans)))
+            {
+                cfreader.init_booleans(options, cached);
+            }
+            return cached;
         }
     }
 
@@ -308,9 +326,18 @@ cfreader.process_file_overrides = function (name, result) {
     var keys = Object.keys(result);
     for (var i=0; i<keys.length; i++) {
         if (keys[i].substr(0,1) === '!') {
+            var ofp = path.join(cfreader.config_path, keys[i].substr(1));
+            cfreader._overrides[ofp] = true;
             // Overwrite the config cache for this filename
-            logger.logwarn('Overriding file ' + keys[i].substr(1) + ' with configuration from ' + name);
-            cfreader._config_cache[path.join(cfreader.config_path, keys[i].substr(1))] = result[keys[i]];
+            cfreader._config_cache[ofp] = result[keys[i]];
+            // Make sure .ini overrides always have a main: {} element
+            if (ofp.substr(-4) === '.ini' && !result[keys[i]].main) {
+                result[keys[i]].main = {};
+            }
+            // Call any reload callbacks for the overriden filename
+            if (cfreader._read_args[ofp] && typeof cfreader._read_args[ofp].cb === 'function') {
+                cfreader._read_args[ofp].cb();
+            }
         }
     }
 };
@@ -337,10 +364,7 @@ cfreader.load_yaml_config = function(name) {
     return result;
 };
 
-cfreader.load_ini_config = function(name, options) {
-    var result       = cfreader.empty_config('ini');
-    var current_sect = result.main;
-    var current_sect_name = 'main';
+cfreader.init_booleans = function (options, result) {
     var bool_matches = [];
     if (options && options.booleans) bool_matches = options.booleans.slice();
 
@@ -354,8 +378,8 @@ cfreader.load_ini_config = function(name, options) {
             var key     = m[2];
 
             var bool_default = section[0] === '+' ? true
-                                :     key[0] === '+' ? true
-                                : false;
+                             :     key[0] === '+' ? true
+                             :     false;
 
             if (section.match(/^(\-|\+)/)) section = section.substr(1);
             if (    key.match(/^(\-|\+)/)) key     =     key.substr(1);
@@ -365,10 +389,18 @@ cfreader.load_ini_config = function(name, options) {
                 bool_matches.push(section+'.'+key);
             }
 
-            if (!result[section]) result[section] = {};
-            result[section][key] = bool_default;
+            if (result[section] === undefined) result[section] = {};
+            if (result[section][key] === undefined) result[section][key] = bool_default;
         }
     }
+    return bool_matches;
+};
+
+cfreader.load_ini_config = function(name, options) {
+    var result       = cfreader.empty_config('ini');
+    var current_sect = result.main;
+    var current_sect_name = 'main';
+    var bool_matches = cfreader.init_booleans(options, result);
 
     if (!utils.existsSync(name)) { return result; }
 
@@ -443,7 +475,7 @@ cfreader.load_flat_config = function(name, type) {
             var data   = fs.readFileSync(name, "UTF-8");
             if (type === 'data') {
                 while (data.length > 0) {
-                    var match = data.match(/^([^\n]*)\n?/);
+                    var match = data.match(/^([^\r\n]*)\r?\n?/);
                     result.push(match[1]);
                     data = data.slice(match[0].length);
                 }

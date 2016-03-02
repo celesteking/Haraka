@@ -1,4 +1,172 @@
 
+2.N.N - Mar NN, 2016
+
+2.7.3 - Feb 04, 2016
+
+* Changes
+    * smtp_proxy & qmail-queue: default to enabled for outbound deliveries
+      (previously used Outbound), to better matches user expectations.
+
+* New Features
+    * outbound: allow passing notes to send_email (#1295)
+
+* Improvements
+    * logging: emit log message queue before shutting down (#1296)
+    * result_store: permit redis pub/sub to work when host != localhost (#1277)
+    * tests: quiet the extremely verbose messages (#1282)
+    * rspamd: add timeout error handling (#1276)
+    * watch: fix display of early_talker results (#1281)
+    * spamassassin: publish results to result_store (#1280)
+    * karma: can now connect to redis on hosts other than localhost (#1275)
+    * geoip & p0f: don't log empty/null values from RFC 1918 connects (#1267)
+    * redis: make plugin params match docs (#1273)
+    * mailbody: small refactoring (#1315)
+    * smtp_proxy & qmail-queue: default to enabled for outbound (#1308)
+
+* Bug Fixes
+    * redis: use correct path for db.select (#1273)
+    * count errors correctly (#1274)
+    * logger: ignore null arguments (#1299)
+    * connection: pause for hook_reset_transaction (#1303)
+    * rcpt_to.routes: update redis usage for compat with redis plugin (#1302)
+    * smtp_forward: use correct config path to auth settings (#1327)
+    * messagestream: correctly pass options parameter to get_data (#1316) 
+    * spf: honour configuration for mfrom scope (#1322)
+    * outbound: Add missing dash to 'Final-Recipient' header name (#1320)
+
+
+2.7.2 - Dec 15, 2015
+
+* Bug Fixes
+    * Revert a change that broke plugin loading
+
+
+2.7.1 - Dec 14, 2015
+
+* New Features
+    * added debian init.d file (#1255) @slattery
+
+* Improvements
+    * smtp_forward auth settings now work (#430)
+    * better handling of broken messages (#1234)
+    * Docker: use latest Phusion image && stdout (#1238, #1239)
+    * Clean up plugin loading a tiny bit (#1242)
+    * make dkim keydir case insensitive (1251)
+    * ignore DNS errors that aren't errors (#1247)
+    * outbound doc updates (#1258) @Currerius
+    * outbound: return DENYSOFT on queue error (#1264)
+    * smtp_client: if enable_tls is set and TLS files missing, warn (#1266)
+
+* Bug Fixes
+    * Don't sent empty headers to rspamd (#1230)
+    * Fix auth_base.js key need to be a string - number.toString() (#1228)
+    * fix bug with empty charset= on mime parts … (#1225)
+    * Fix "passwd" check crash with numeric password. (#1254)
+    * result_store: show arrays when not empty (#1261)
+
+
+2.7.0 - Oct 07, 2015
+
+* New Features
+    * SPF bounce check
+    * rspamd plugin (@fatalbanana)
+    * watch plugin
+    * limit plugin (connection concurrency, errors, unrecognized commands)
+    * plugins can now be npm packages (see also #946)
+    * built-in HTTP server (Express backed)
+    * ESETS AV plugin
+    * DCC plugin (incomplete)
+    * Add LOGIN support to XCLIENT
+    * backscatterer plugin
+    * full IPv4 & IPv6 compatibility inbound #1120, #1123, #1154 (@Dexus)
+    * Early talker #1075 (@smfreegard, @msimerson)
+    * permit loading of plugins in node_modules #1056 (@msimerson)
+
+* Improvements
+    * Fix anti_spoof by use config #1171
+    * Add license clause #1170
+    * package.json dependencies and travis update #1147, #1168 (@Dexus)
+    * logging: remove node-syslog and strong-fork-syslog with modern-syslog #1145 (@Dexus)
+    * aliases: support for email, user and host aliases #1149 (@Dexus)
+    * add docs for use private key with TLS #1130 (@Dexus)
+    * outbound: ENOENT on dotfile - compatibility for windows #1129 (@Dexus)
+    * plugin/attachment: block more attachment file types #1191 (@Dexus)
+    * remove double functions #1126 (@Dexus)
+    * Outbound Bounce messages according to RFC3464 #1189 (@hatsebutz)
+    * toobusy: only run checks if toobusy.js installed and loads
+    * HAProxy: set local_ip, local_port and remote_port
+    * save auth pass/fail/user to result_store
+    * ini files no longer require values (useful for storing lists)
+    * connection: add MAIL and RCPT to results
+    * results_store: enable 'emit' feature for .push()
+    * add support for custom Outbound Received header value (@zombified)
+    * save smtp_forward result to result_store
+    * auth_base: permit a return message (@DarkSorrow)
+    * add DSN.create() and RFC 4954 support
+    * enhanced pipelining support
+    * added config/access.domains with some tips (@EyePulp)
+    * Add SSL detection over plain-text socket
+    * earlytalker: store results
+    * bounce: make it safe to check non_local_msgid
+    * AVG: store results, added defer options
+    * tls: change createCredentials to tls.createSecureContext (@DarkSorrow)
+    * update dependency versions (esp async 0.2.9 -> 1.0.0)
+    * ASN docs: add FTP download note for routeviews
+    * karma: removed concurrency limits (see limit plugin) and penalty feature
+    * added utils.elapsed()
+    * deny message includes hostname
+    * Add Fisher-Yates shuffle to randomize lookup order in data.uribl
+    * change default message size limit to 25mb
+    * auth_base: save auth results
+    * upgrade toobusy plugin to toobusy-js (@alexkavon)
+    * configfile: permit / char in ini keys
+    * added utils.node_min()
+    * added result_store.get_all()
+    * updated ubuntu upstart script
+    * plugin/rate_limit: return in no custom default is set 0 = unlimited #1186, #1185
+    * Outbound.send_email: added dot-stuffing #1176, #1165 (@hatsebutz)
+    * make sure server object is availabe to plugins loaded from node_modules #1162 (@bmonty)
+    * Net_utils.get_ips_by_host #1160 (@msimerson)
+    * fcrdns: don't log error for ENODATA #1140 (@msimerson)
+    * improve MUA detection #1137 (@msimerson)
+    * tls: tmp disable for hosts that fail STARTTLS #1136 (@msimerson)
+    * karma: skip deny on outbound hooks #1100 (@msimerson)
+    * Store HAProxy IP in connection object #1097 (@smfreegard)
+    * Remove UUID from queued message #1092 (@smfreegard)
+
+* Bug Fixes
+    * fix windows build and test failures #1076 (@msimerson)
+    * Fix plugin ordering #1081 (@smfreegard)
+    * Fix distance reporting to X-Haraka-GeoIP for geoip-lite #1086 (@smfreegard)
+    * uribl: prevent calling next() more than 1x #1138 (@msimerson)
+    * Fix so constants are imported when plugin is loaded from node_modules. #1133 (@bmonty)
+    * Include STMP-code in bounce-reason string for upstream 5XX responses #1117 (@hatsebutz)
+    * TLS fixes: add timed_out flag and karma should not run deny hook on it. #1109 (@smfreegard)
+    * Fix port to number instead of string for HAProxy #1108 (@DarkSorrow)
+    * Plugin dcc: fixed syntax error #1164 (@hatsebutz)
+    * config: fix flat files if \r\n lines #1187 (@Dexus)
+    * corrected hook_rcpt log code hook_rcpt_ok returns CONT
+    * fix crash bug when loglevel = LOGDEBUG
+    * corrected pathname in rcpt.ldap plugin (@abhas)
+    * added helo.checks boolean for proto_mismatch
+    * make rate_limit redis keys always expire @celesteking
+    * dkim_sign: Buffer.concat expects an array of buffers
+    * transaction: check discard_data before adding line end (@DarkSorrow)
+    * fix 8-bit msg not displayed properly in gmail
+    * fcrdns: always init results
+    * TLS timer on error
+    * dkim_verify: fixed timeout issue
+    * smtp_[proxy|forward]: correct authentication example
+    * Fork child workers after init_master hook
+    * connection: return 450/550 for plugin DENY* (was 452/552)
+    * spamassassin: don't call next() when transaction gone
+    * outbound: fix crash when sending bounce mail
+    * auth_base: fix bad protocol in auth_base.js #1121 (@Dexus)
+    * outbound: Fix HELO/rDNS issue while using multiple outbound ip #1128 (@Dexus)
+    * connection: Fix bug when client disconnect after sending data #1193
+    * Fix connect.geoip bug #1144 (@smfreegard)
+    * Fix tiny bug in messagesniffer #1198 (@smfreegard)
+
 2.6.1 - Mar 27, 2015
 
 * added sedation timers for config file re-reading
@@ -34,7 +202,7 @@
 * removed contrib/geolite-mirror-simple.pl (replaced by
   docs update pointing to maxmind-geolite-mirror)
 * rcpt.routes: new plugin by @msimerson
-* make haproxy IPv6 compatible 
+* make haproxy IPv6 compatible
 * record_envelope_addresses: new plugin by @deburau
 * prevent_credential_leaks: new plugin by @smfreegard
 * config:
