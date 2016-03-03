@@ -549,6 +549,9 @@ exports.trimPluginName = function (name) {
     // phase prefix and return `headers` or `geoip`
     var parts = name.split('.');
 
+    if (parts.length == 1)
+        return name;
+
     switch (parts[0]) {
         case 'helo':
             return 'helo';
