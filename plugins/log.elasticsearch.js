@@ -543,7 +543,20 @@ exports.get_plugin_results = function (connection) {
     return pir;
 };
 
+// in-place beautification
+exports.beautify_plugin_name = function(name) {
+    switch (name) {
+        case 'auth/auth_anti_brute':
+            return 'auth_anti_brute';
+        case 'auth/auth_fred':
+            return 'auth_fred';
+    }
+    return name;
+};
+
 exports.trimPluginName = function (name) {
+    // beautify plugin name first
+    name = this.beautify_plugin_name(name);
 
     // for plugins named like: data.headers or connect.geoip, strip off the
     // phase prefix and return `headers` or `geoip`
@@ -562,12 +575,6 @@ exports.trimPluginName = function (name) {
             return parts.slice(1).join('.');
     }
 
-    switch (name) {
-        case 'auth/auth_anti_brute':
-            return 'auth_anti_brute';
-        case 'auth/auth_fred':
-            return 'auth_fred';
-    }
     return name;
 };
 
