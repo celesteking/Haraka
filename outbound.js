@@ -231,7 +231,7 @@ exports.load_queue_files = function (pid, cb_name, files) {
         this.loginfo("Grabbing queue files for pid: " + pid);
         async.eachLimit(files, 200, function (file, cb) {
             var match = /^(\d+)(_\d+_)(\d+)(_\d+\..*)$/.exec(file);
-            if (match && match[3] === pid) {
+            if (match && match[3] == pid) {
                 var next_process = match[1];
                 var new_filename = match[1] + match[2] + process.pid + match[4];
                 // self.loginfo("Renaming: " + file + " to " + new_filename);
