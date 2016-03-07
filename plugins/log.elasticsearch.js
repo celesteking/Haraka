@@ -1,11 +1,14 @@
 'use strict';
 
-// V: 0.2
+// V: 0.3
 
 // log to Elasticsearch
 
 var utils = require('Haraka/utils');
 var util = require('util');
+var os = require('os');
+var dns = require('dns');
+var Q = require('q');
 
 exports.register = function() {
     var plugin = this;
@@ -70,6 +73,20 @@ exports.load_es_ini = function () {
     if (!plugin.cfg.main.port) {
         plugin.cfg.main.port = '9200';
     }
+
+    var logging_host = plugin.cfg.main.logging_host;
+    if (logging_host == "fqdn") {
+        plugin.get_fqdn()
+                .then(function(fqdn){
+                    plugin.cfg.main.logging_host = fqdn;
+                    plugin.loginfo('logging_host field set to: ' + fqdn);
+                })
+                .fail(function(error){
+                    plugin.logerror("Couldn't determine fqdn, disabling sending logging_host field. e: " + error);
+                    plugin.cfg.main.logging_host = null;
+                })
+                .done();
+    }
 };
 
 exports.log_transaction = function (next, connection) {
@@ -81,6 +98,8 @@ exports.log_transaction = function (next, connection) {
     }
 
     var res = { plugins: plugin.get_plugin_results(connection) };
+    if (plugin.cfg.main.logging_host)
+        res.event_host = plugin.cfg.main.logging_host;
 
     res.timestamp = new Date().toISOString();
 
@@ -173,6 +192,8 @@ exports.log_connection = function (next, connection) {
 
     var res = { "plugins": plugin.get_plugin_results(connection) };
     res.timestamp = new Date().toISOString();
+    if (plugin.cfg.main.logging_host)
+        res.event_host = plugin.cfg.main.logging_host;
 
     plugin.populate_conn_properties(connection, res);
 
@@ -417,7 +438,7 @@ exports.create_es_document = function(opts){
 //  plugin,conn,txn
 //  msg
 exports.log_event = function(params){
-    var myself = this;
+    var plugin = this;
 
     var docu = {
         level: params.level || 'debug',
@@ -426,6 +447,8 @@ exports.log_event = function(params){
         message: params.msg,
         timestamp: new Date().toISOString()
     };
+    if (plugin.cfg.main.logging_host)
+        docu.event_host = plugin.cfg.main.logging_host;
 
     var es_opts = {
         index: exports.getIndexName('events'),
@@ -433,7 +456,7 @@ exports.log_event = function(params){
         document: docu
     };
 
-    return myself.create_es_document(es_opts);
+    return plugin.create_es_document(es_opts);
 };
 
 exports.log_hooked = function(next, logger, log){
@@ -732,4 +755,21 @@ exports.process_transaction_results = function(pir, txr, name) {
             break;
     }
 };
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// ---------------------------------------------------------------------------
+
+// promise'd fqdn
+exports.get_fqdn = function () {
+    return Q.nfcall(dns.lookup, os.hostname(), { hints: dns.ADDRCONFIG })
+            .then(function (args) {
+                if (!args[0])
+                    throw new Error('no IP returned');
+
+                return Q.nfcall(dns.lookupService, args[0], 0)
+                        .then(function (args) {
+                            if (!args[0])
+                                throw new Error('no hostname returned');
+                            return args[0];
+                        });
+            });
+};
+// ---------------------------------------------------------------------------
