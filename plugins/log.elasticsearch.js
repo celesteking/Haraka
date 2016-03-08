@@ -272,7 +272,7 @@ exports.log_deferred = function(next, hmail, opts){
     var error_message = opts.err;
     var error = opts.extra;
 
-    plugin.logdebug("Deferred: " + error_message + ', extra: ' + util.inspect(error));
+    plugin.logdebug("Deferred: " + error_message + ', extra: ' + util.inspect(error).replace(/\n/g, ''));
 //    plugin.lognotice("Deferred hmail rcpt: " + util.inspect(hmail.todo.rcpt_to.map(function(e){ return e.original })));
 
     if (!hmail.todo.notes.th_table)
@@ -317,7 +317,7 @@ exports.log_deferred = function(next, hmail, opts){
 exports.log_bounced = function(next, hmail, error){
     var plugin = this;
 
-    plugin.logdebug("Bounced: " + util.inspect(error));
+    plugin.logdebug("Bounced: " + util.inspect(error).replace(/\n/g, ''));
 
     var bounced_addrs = error.bounced_rcpt || hmail.todo.rcpt_to;
 
