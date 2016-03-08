@@ -615,7 +615,7 @@ exports.prune_empty = function (pi) {
     // remove undefined keys and empty strings, arrays, or objects
     for (var e in pi) {
         var val = pi[e];
-        if (val === undefined) {
+        if (val == null) { // catch both null and undefined
             delete pi[e];
             continue;
         }
