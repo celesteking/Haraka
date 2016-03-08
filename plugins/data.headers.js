@@ -224,7 +224,7 @@ exports.user_agent = function (next, connection) {
         if (!header) { continue; }   // header not present
         found_ua++;
         connection.transaction.results.add(plugin,
-            {pass: 'UA('+header.substring(0,12)+')'});
+            {pass: 'UA('+header.substring(0,12).replace(/[\n\r]/g, '')+')'});
     }
     if (found_ua) { return next(); }
 
