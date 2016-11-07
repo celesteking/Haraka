@@ -44,7 +44,9 @@ AttachmentStream.prototype.emit_end = function () {
 AttachmentStream.prototype.pipe = function (dest, options) {
     var self = this;
     this.paused = false;
-    Stream.prototype.pipe.call(this, dest, options);
+
+    var pipe = Stream.prototype.pipe.call(this, dest, options);
+
     dest.on('drain', function () {
         // console.log("YYY: DRAIN!!!");
         if (self.paused) self.resume();
@@ -57,6 +59,8 @@ AttachmentStream.prototype.pipe = function (dest, options) {
         // console.log("YYY: CLOSE!!");
         if (self.paused) self.resume();
     });
+
+    return pipe;
 };
 
 AttachmentStream.prototype.setEncoding = function (enc) {
