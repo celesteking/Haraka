@@ -96,6 +96,7 @@ ResultStore.prototype.add = function (plugin, obj) {
 
     // anything else is an arbitrary key/val to store
     for (key in obj) {
+        if (key.match(/^human(_html)?$/)) continue;
         if (all_opts.indexOf(key) !== -1) continue; // weed out our keys
         result[key] = obj[key];            // save the rest
     }
@@ -130,6 +131,7 @@ ResultStore.prototype.push = function (plugin, obj) {
     this.redis_publish(name, obj);
 
     for (var key in obj) {
+        if (key.match(/^human(_html)?$/)) continue;
         if (!result[key]) result[key] = [];
         if (Array.isArray(obj[key])) {
             result[key] = result[key].concat(obj[key]);
