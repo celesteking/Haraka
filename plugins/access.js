@@ -317,6 +317,7 @@ exports.mail_from_access = function(next, connection, params) {
 
     // address blacklist checks
     file = plugin.cfg.black.mail;
+    connection.logdebug(plugin, 'checking ' + mail_from + ' against ' + file);
     if (plugin.in_list('black', 'mail', mail_from)) {
         connection.transaction.results.add(plugin, {fail: file, emit: true});
         return next(DENY, mail_from + ' ' + plugin.cfg.deny_msg.mail);
@@ -420,7 +421,7 @@ exports.in_list = function (type, phase, address) {
 
     try {
         var addr = new Address(address);
-        return plugin.list[type][phase].indexOf(addr.host) !== -1;
+        return plugin.list[type][phase][addr.host];
     } catch (err) {
         return false;
     }
@@ -437,16 +438,6 @@ exports.in_re_list = function (type, phase, address) {
             plugin.cfg.re[type][phase].source);
     }
     return plugin.list_re[type][phase].test(address);
-};
-
-exports.in_file = function (file_name, address, connection) {
-    var plugin = this;
-    // using indexOf on an array here is about 20x slower than testing against
-    // a key in an object
-    connection.logdebug(plugin, 'checking ' + address +
-            ' against ' + file_name);
-    return (plugin.config.get(file_name, 'list')
-            .indexOf(address) === -1) ? false : true;
 };
 
 exports.in_re_file = function (file_name, address) {
