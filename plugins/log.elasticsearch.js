@@ -25,7 +25,7 @@ exports.register = function() {
 
     plugin.es = new elasticsearch.Client({
         host: plugin.cfg.main.host + ':' + plugin.cfg.main.port,
-        log: 'trace'
+//        log: 'trace'
     });
 
     plugin.es.ping({
