@@ -24,8 +24,8 @@ exports.register = function() {
     plugin.load_es_ini();
 
     plugin.es = new elasticsearch.Client({
-        host: plugin.cfg.main.host + ':' + plugin.cfg.main.port
-        // log: 'trace',
+        host: plugin.cfg.main.host + ':' + plugin.cfg.main.port,
+        log: 'trace'
     });
 
     plugin.es.ping({
@@ -38,7 +38,7 @@ exports.register = function() {
             if (error) {
                 // we don't bother error handling hear b/c the ES library does
                 // that for us.
-                plugin.logerror('cluster is down!');
+                plugin.logerror('Cluster is down! Cause: ' + error.message);
             }
             else {
                 plugin.lognotice('connected');
@@ -93,9 +93,8 @@ exports.log_transaction = function (next, connection) {
     var plugin = this;
     var trans = connection.transaction;
 
-    if (plugin.cfg.ignore_hosts) {
-        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
-    }
+    if (plugin.skip_logging(connection))
+        return next(CONT, 'logging skipped per config');
 
     var res = { plugins: plugin.get_plugin_results(connection) };
     if (plugin.cfg.main.logging_host)
@@ -180,9 +179,8 @@ exports.log_transaction = function (next, connection) {
 exports.log_connection = function (next, connection) {
     var plugin = this;
 
-    if (plugin.cfg.ignore_hosts) {
-        if (plugin.cfg.ignore_hosts[connection.remote_host]) return next();
-    }
+    if (plugin.skip_logging(connection))
+        return next(CONT, 'logging skipped per config');
 
     if (connection.notes.elasticsearch &&
         connection.notes.elasticsearch === connection.tran_count) {
@@ -773,3 +771,10 @@ exports.get_fqdn = function () {
             });
 };
 // ---------------------------------------------------------------------------
+exports.skip_logging = function(connection){
+    var cfi = this.cfg.ignore_hosts;
+
+    if (cfi && (cfi[connection.remote_host] || cfi[connection.remote_ip])) {
+        return true;
+    }
+};
