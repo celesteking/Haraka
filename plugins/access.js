@@ -440,19 +440,6 @@ exports.in_re_list = function (type, phase, address) {
     return plugin.list_re[type][phase].test(address);
 };
 
-exports.in_re_file = function (file_name, address) {
-    // Since the helo.checks plugin uses this method, I tested to see how
-    // badly if affected performance. It took 8.5x longer to run than
-    // in_re_list.
-    this.logdebug(this, 'checking ' + address + ' against ' + file_name);
-    var re_list = utils.valid_regexes(
-            this.config.get(file_name, 'list'), file_name);
-    for (var i=0; i < re_list.length; i++) {
-        if (new RegExp('^' + re_list[i] + '$', 'i').test(address)) return true;
-    }
-    return false;
-};
-
 exports.load_file = function (type, phase) {
     var plugin = this;
     if (!plugin.cfg.check[phase]) {
