@@ -363,10 +363,13 @@ exports.update_es_txn_document = function(opts){
         id: opts.uuid,
         index: exports.getIndexName('transaction'),
         document: {
-            script_file: 'haraka-update-trans-outbound',
-            params: {
-                new_events: opts.new_events,
-                rcpt_status: opts.rcpt_status
+            script: {
+                lang: "groovy",
+                file: "haraka-update-trans-outbound",
+                params: {
+                    new_events: opts.new_events,
+                    rcpt_status: opts.rcpt_status
+                }
             },
             upsert: {
                 txn: {
