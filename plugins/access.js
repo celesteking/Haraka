@@ -429,14 +429,9 @@ exports.in_list = function (type, phase, address) {
 
 exports.in_re_list = function (type, phase, address) {
     var plugin = this;
+
     if (!plugin.list_re[type][phase]) { return false; }
-    if (!plugin.cfg.re[type][phase].source) {
-        plugin.logdebug(plugin, 'empty file: ' + plugin.cfg.re[type][phase]);
-    }
-    else {
-        plugin.logdebug(plugin, 'checking ' + address + ' against ' +
-            plugin.cfg.re[type][phase].source);
-    }
+
     return plugin.list_re[type][phase].test(address);
 };
 
@@ -457,6 +452,10 @@ exports.load_file = function (type, phase) {
     // init the list store, type is white or black
     if (!plugin.list)       { plugin.list = { type: {} }; }
     if (!plugin.list[type]) { plugin.list[type] = {}; }
+    plugin.list[type][phase] = {}; // we always want the list to be reset to empty state
+
+    if (!list.length)
+        return plugin.loginfo(plugin, 'Skipping empty file ' + file_name);
 
     // toLower when loading spends a fraction of a second at load time
     // to save millions of seconds during run time.
@@ -464,18 +463,20 @@ exports.load_file = function (type, phase) {
     for (i=0; i<list.length; i++) {
         plugin.list[type][phase][list[i].toLowerCase()] = true;
     }
+
+    plugin.loginfo(plugin, 'Loaded ' + list.length + ' list entries from ' + file_name);
 };
 
 exports.load_re_file = function (type, phase) {
     var plugin = this;
-    if (!plugin.cfg.check[phase]) {
-        plugin.loginfo(plugin, "skipping " + plugin.cfg.re[type][phase]);
-        return;
-    }
+    var file_name = plugin.cfg.re[type][phase];
+
+    if (!plugin.cfg.check[phase])
+        return plugin.loginfo(plugin, 'skipping ' + file_name + ' because phase ' + phase + ' is disabled in config');
 
     var regex_list = utils.valid_regexes(
             plugin.config.get(
-                plugin.cfg.re[type][phase],
+                file_name,
                 'list',
                 function () {
                     plugin.load_re_file(type, phase);
@@ -485,20 +486,28 @@ exports.load_re_file = function (type, phase) {
     // initialize the list store
     if (!plugin.list_re)       plugin.list_re = { type: {} };
     if (!plugin.list_re[type]) plugin.list_re[type] = {};
+    plugin.list_re[type][phase] = null; // we always want the list to be reset to empty state
+
+    if (!regex_list.length) {
+        plugin.loginfo(plugin, 'Skipping empty file: ' + file_name);
+        return;
+    }
 
     // compile the regexes at the designated location
     plugin.list_re[type][phase] =
         new RegExp('^(' + regex_list.join('|') + ')$', 'i');
+
+    plugin.loginfo(plugin, 'Loaded ' + regex_list.length + ' RegExp entries from ' + file_name);
 };
 
 exports.load_domain_file = function (type, phase) {
     var plugin = this;
-    if (!plugin.cfg.check[phase]) {
-        plugin.loginfo(plugin, "skipping " + plugin.cfg[type][phase]);
-        return;
-    }
-
     var file_name = plugin.cfg[type][phase];
+
+    if (!plugin.cfg.check[phase])
+        return plugin.loginfo(plugin, 'skipping ' + file_name + ' because phase ' + phase + ' is disabled in config');
+
+
     var list = plugin.config.get(file_name, 'list', function () {
         plugin.load_domain_file(type, phase);
     });
