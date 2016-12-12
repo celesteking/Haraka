@@ -29,11 +29,8 @@ exports.register = function() {
     });
 
     plugin.es.ping({
-        // ping usually has a 100ms timeout
-        requestTimeout: plugin.cfg.timeout || 1000,
-
-        // undocumented params are appended to the query string
-        hello: "elasticsearch!"
+            // ping usually has a 100ms timeout
+            requestTimeout: plugin.cfg.timeout || 1000,
         }, function (error) {
             if (error) {
                 // we don't bother error handling hear b/c the ES library does
