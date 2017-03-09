@@ -2,6 +2,7 @@
 
 var SPF = require('./spf').SPF;
 var net_utils = require('./net_utils');
+var DSN = require('./dsn');
 
 // Override logging in SPF module
 var plugin = exports;
@@ -27,6 +28,7 @@ exports.load_config = function () {
             '-deny.helo_softfail',
             '-deny.helo_fail',
             '-deny.helo_permerror',
+            '-deny.openspf_text',
 
             '-deny.mfrom_softfail',
             '-deny.mfrom_fail',
@@ -184,8 +186,7 @@ exports.hook_mail = function (next, connection, params) {
             domain: host,
             emit: true,
         });
-        return plugin.return_results(next, connection, spf, 'mfrom', result,
-            '<'+mfrom+'>');
+        return plugin.return_results(next, connection, spf, 'mfrom', result, mfrom);
     };
 
     // typical inbound (!relay)
@@ -228,6 +229,8 @@ exports.return_results = function(next, connection, spf, scope, result, sender) 
     var msgpre = 'sender ' + sender;
     var deny = connection.relaying ? 'deny_relay' : 'deny';
     var defer = connection.relaying ? 'defer_relay' : 'defer';
+    var sender_id = (scope === 'helo') ? connection.hello_host : sender;
+    var text = DSN.sec_unauthorized('http://www.openspf.org/Why?s=' + scope + ';id=' + sender_id + ';ip=' + connection.remote_ip);
 
     switch (result) {
         case spf.SPF_NONE:
@@ -236,12 +239,14 @@ exports.return_results = function(next, connection, spf, scope, result, sender) 
             return next();
         case spf.SPF_SOFTFAIL:
             if (plugin.cfg[deny][scope + '_softfail']) {
-                return next(DENY, msgpre + ' SPF SoftFail');
+                text = plugin.cfg[deny]['openspf_text'] ? text : (msgpre + ' SPF SoftFail');
+                return next(DENY, text);
             }
             return next();
         case spf.SPF_FAIL:
             if (plugin.cfg[deny][scope + '_fail']) {
-                return next(DENY, msgpre + ' SPF Fail');
+                text = plugin.cfg[deny]['openspf_text'] ? text : (msgpre + ' SPF Fail');
+                return next(DENY, text);
             }
             return next();
         case spf.SPF_TEMPERROR:
