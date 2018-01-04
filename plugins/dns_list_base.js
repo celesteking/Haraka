@@ -44,7 +44,7 @@ exports.lookup = function (lookup, zone, cb) {
 
         // Check for a result of 127.0.0.1 or outside 127/8
         // This should *never* happen on a proper DNS list
-        if (a && (a[0] === '127.0.0.1' || (a[0].split('.'))[0] !== '127')) {
+        if (a && ((!self.is_dumb && a[0] === '127.0.0.1') || (a[0].split('.'))[0] !== '127')) {
             self.disable_zone(zone, a);
             return cb(err, null);  // Return a null A record
         }
@@ -146,7 +146,7 @@ exports.first = function (lookup, zones, cb, cb_each) {
     });
 };
 
-exports.check_zones = function (interval, dumb_check = false) {
+exports.check_zones = function (interval) {
     var self = this;
     this.disable_allowed = true;
     if (interval) interval = parseInt(interval);
@@ -163,7 +163,7 @@ exports.check_zones = function (interval, dumb_check = false) {
         this.multi('127.0.0.1', zones, function (err, zone, a, pending) {
             if (!zone) return;
 
-            if ((!dumb_check && a) || (err && err.code === 'ETIMEOUT')) {
+            if ((!self.is_dumb && a) || (err && err.code === 'ETIMEOUT')) {
                 return self.disable_zone(zone, ((a) ? a : err.code));
             }
 
