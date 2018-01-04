@@ -146,7 +146,7 @@ exports.first = function (lookup, zones, cb, cb_each) {
     });
 };
 
-exports.check_zones = function (interval) {
+exports.check_zones = function (interval, dumb_check = false) {
     var self = this;
     this.disable_allowed = true;
     if (interval) interval = parseInt(interval);
@@ -163,7 +163,7 @@ exports.check_zones = function (interval) {
         this.multi('127.0.0.1', zones, function (err, zone, a, pending) {
             if (!zone) return;
 
-            if (a || (err && err.code === 'ETIMEOUT')) {
+            if ((!dumb_check && a) || (err && err.code === 'ETIMEOUT')) {
                 return self.disable_zone(zone, ((a) ? a : err.code));
             }
 
